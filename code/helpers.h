@@ -3,19 +3,6 @@
 #include <numeric>
 #include <algorithm>
 
-template <typename T>
-class Validator
-{
-    private:
-        std::vector<T> flatMat1;
-        std::vector<T> flatMat2;
-        float eps;
-    public:
-        Validator(T *flatMat1, T *flatMat2, int N);
-        void setEps(int);
-        void validate();
-};
-
 template <typename T, int N>
 class RandomMatrix
 {
@@ -43,7 +30,7 @@ class RandomMatrix
             }                            
         }
 
-    public:
+    public:        
         RandomMatrix()
         {
             this->setSeed(37);
@@ -53,6 +40,11 @@ class RandomMatrix
         {
             this->setDimensions(dimensions);          
             this->flatMat.insert(this->flatMat.begin(), flatMat, flatMat + this->flatSize());            
+        }
+
+        T* rawData()
+        {
+            return this->flatMat.data();
         }
 
         RandomMatrix<T, N>& setSeed(unsigned s)
@@ -71,4 +63,17 @@ class RandomMatrix
             });            
             
         }
+};
+
+template <typename T>
+class Validator
+{
+    private:
+        std::vector<T> flatMat1;
+        std::vector<T> flatMat2;
+        float eps;
+    public:
+        Validator(T *flatMat1, T *flatMat2, int N);
+        void setEps(int);
+        void validate();
 };

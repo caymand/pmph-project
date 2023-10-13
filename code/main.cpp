@@ -16,10 +16,9 @@ int main()
 
     RandomMatrix<int, 1> B(r1, N);
     RandomMatrix<int, 1> C;
-    A.fill<10>(N);
+    C.fill<RAND_MAX>(N);
 
-    Validator<int> validator(r1, r2, N);    
+    Validator<int> validator(B.rawData(), C.rawData(), N);    
     validator.validate();
-
-
+    
 }
