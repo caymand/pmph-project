@@ -1,6 +1,6 @@
 # TODO: use other arch?
 CXX = g++ #nvcc -O3 -arch=sm_80
-CXXFLAGS = -O3 -std=c++20 
+CXXFLAGS = -O0 -std=c++20 
 CFILES = helpers.cpp main.cpp
 HEADERS = helpers.h
 

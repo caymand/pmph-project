@@ -4,10 +4,10 @@
 #include <algorithm>
 
 template <typename T>
-Validator<T>::Validator(T *res1, T* res2, int N) 
+Validator<T>::Validator(T *flatMat1, T* flatMat2, int N) 
 {
-    this->res1.insert(this->res1.begin(), res1, res1 + N);
-    this->res2.insert(this->res2.begin(), res2, res2 + N);
+    this->flatMat1.insert(this->flatMat1.begin(), flatMat1, flatMat1 + N);
+    this->flatMat2.insert(this->flatMat2.begin(), flatMat2, flatMat2 + N);
     this->eps = 0.0000000001; // e-10
 }
 template <typename T>
@@ -19,16 +19,16 @@ template <typename T>
 void Validator<T>::validate()
 {    
     bool errValue = false;
-    std::vector<bool> flatMask(this->res1.capacity());
+    std::vector<bool> flatMatrixMask(this->flatMat1.capacity());
     std::transform(
-        this->res1.begin(), this->res1.end(), this->res2.begin(), flatMask.begin(),  
+        this->flatMat1.begin(), this->flatMat1.end(), this->flatMat2.begin(), flatMatrixMask.begin(),  
         [this] (T v1, T v2) {
             float err = (float)std::abs(v1 - v2) / std::max(v1, v2);            
             return err < this->eps;
         }
     );    
-    auto errorCount = std::count(flatMask.begin(), flatMask.end(), errValue);
-    auto firstError = std::find(flatMask.begin(), flatMask.end(), errValue) - flatMask.begin();
+    auto errorCount = std::count(flatMatrixMask.begin(), flatMatrixMask.end(), errValue);
+    auto firstError = std::find(flatMatrixMask.begin(), flatMatrixMask.end(), errValue) - flatMatrixMask.begin();
     if (errorCount <= 0) {
         std::cout << "VALID" << std::endl;
         std::cout << "-----" << std::endl;    
@@ -39,8 +39,9 @@ void Validator<T>::validate()
     std::cout << "Found: " << errorCount << " ";
     std::cout << "wrong elements." << std::endl;
     std::cout << "First at flat index: " << firstError << std::endl;
-    std::cout << "Expected: " << this->res1[firstError] << " ";
-    std::cout << "got: " << this->res2[firstError] << std::endl;
+    std::cout << "Expected: " << this->flatMat1[firstError] << " ";
+    std::cout << "got: " << this->flatMat2[firstError] << std::endl;
 }
+
 
 template class Validator<int>;
