@@ -1,8 +1,17 @@
 # TODO: use other arch?
-NVCC = nvcc -O3 -arch=sm_80
+CXX = g++ #nvcc -O3 -arch=sm_80
+CXXFLAGS = -O3 -std=c++20 
+CFILES = helpers.cpp main.cpp
+HEADERS = helpers.h
 
-all:
-	$(NVCC) main.cu -o main
+MAIN = main
+
+# depends on building the main file
+all: $(MAIN)
+
+# depends on headers and source
+$(MAIN): $(CFILES) $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(CFILES) -o $(MAIN)
 
 clean:
 	rm main
