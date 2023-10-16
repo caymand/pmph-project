@@ -1,8 +1,7 @@
 
 #ifndef MULT_KERNELS
 #define MULT_KERNELS
-
-#include "matmul.cuh"
+#include <stdint.h>
 
 template <class ElTp, int Ty, int Ry, int Tx, int Rx, int Tk>
 __global__ void matMulTiled(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB, int widthA) {
@@ -62,8 +61,9 @@ __global__ void matMulTiled(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB, 
           for(int i=0; i<Ry; i++) {
               #pragma unroll
               for(int j=0; j<Rx; j++) {
-                  float Bkj = Bloc[k][threadIdx.x * Rx + j];
-                  css[i][j] += Aik * Bkj;                
+                float Aik = Aloc[threadIdx.y * Ry + i][k];
+                float Bkj = Bloc[k][threadIdx.x * Rx + j];
+                css[i][j] += Aik * Bkj;                
 
               }
           }

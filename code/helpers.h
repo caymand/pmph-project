@@ -3,24 +3,25 @@
 #include <numeric>
 #include <algorithm>
 #include <sys/time.h>
+#include <cuda_runtime.h>
 
 template <typename T, int N>
 class RandomMatrix
 {
     private:
         unsigned seed;
-        // std::vector<T> flatMat;
+        std::vector<T> flatMat;
         std::vector<unsigned> dimensions;
         unsigned flatSize();
         void setDimensions(const unsigned dimensions, ...);
 
-    public:        
-        std::vector<T> flatMat;
+    public:                
         RandomMatrix();
         RandomMatrix(T *flatMat, const unsigned dimensions, ...);
-        T* rawData();
+        T* to_cpu();
+        T* to_gpu();
         RandomMatrix<T, N>& setSeed(unsigned s);        
-        template <int RANDMAX> void fill(const unsigned dimensions, ...);        
+        template <int RANDMAX> void fill(const unsigned dimensions, ...);                
 };
 
 
@@ -66,6 +67,15 @@ int printGBSec(long int elapsed_time_us, unsigned long total_memsize)
 int printGFlops(long int elapsed_time_us, unsigned long total_flops) 
 {
     return printPerformanceMetric(elapsed_time_us, total_flops, "GFlops/sec");
+}
+
+int gpuAssert(cudaError_t code) 
+{
+    if(code != cudaSuccess) {
+        printf("GPU Error: %s\n", cudaGetErrorString(code));
+        return -1;
+    }
+    return 0;
 }
 
 

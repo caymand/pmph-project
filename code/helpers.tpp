@@ -1,5 +1,8 @@
 #pragma once
 #include <sys/time.h>
+#include <algorithm>
+#include <cstdarg>
+//#include <cuda_runtime.h>
 
 // Validator
 template <typename T>
@@ -48,7 +51,7 @@ void Validator<T>::validate()
 template <typename T, int N>
 unsigned RandomMatrix<T, N>::flatSize() 
 {
-    return std::reduce(
+    return std::accumulate(
         this->dimensions.begin(), this->dimensions.end(), 
         1, 
         std::multiplies<T>()
@@ -78,10 +81,22 @@ RandomMatrix<T, N>::RandomMatrix(T *flatMat, const unsigned dimensions, ...)
     this->flatMat.resize(this->flatSize());
 }
 template <typename T, int N>
-T* RandomMatrix<T, N>::rawData()
+T* RandomMatrix<T, N>::to_cpu()
 {
     return this->flatMat.data();
 }
+
+template <typename T, int N>
+T* RandomMatrix<T, N>::to_gpu() 
+{
+    void *gpu_mem;
+    if (!gpuAssert(cudaMalloc(&gpu_mem, this->flatSize() * sizeof(T)))) 
+    {
+        exit(1);
+    }
+    return (T *) gpu_mem;
+}
+
 template <typename T, int N>
 RandomMatrix<T, N>& RandomMatrix<T, N>::setSeed(unsigned s)
 {

@@ -22,7 +22,7 @@ int main()
     TimeMeasurement t;
     
     t.start();
-    goldenSeq<float>(A.rawData(), B.rawData(), C.data(), n, k, m);
+    goldenSeq<float>(A.to_cpu(), B.to_cpu(), C.data(), n, k, m);
     t.stop();
     
     if (C[0] == 0.0f)  {
