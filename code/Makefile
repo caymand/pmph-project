@@ -1,8 +1,8 @@
 # TODO: use other arch?
 CXX = g++ #nvcc -O3 -arch=sm_80
-CXXFLAGS = -O0 -std=c++20 
+CXXFLAGS = -O1 -std=c++20 
 CFILES = main.cpp
-HEADERS = helpers.h helpers.tpp
+HEADERS = helpers.h helpers.tpp goldenseq.h
 
 MAIN = main
 
@@ -14,4 +14,4 @@ $(MAIN): $(CFILES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(CFILES) -o $(MAIN)
 
 clean:
-	rm main
+	- rm main

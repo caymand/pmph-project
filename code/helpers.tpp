@@ -1,4 +1,5 @@
 #pragma once
+#include <sys/time.h>
 
 // Validator
 template <typename T>
@@ -73,8 +74,8 @@ RandomMatrix<T, N>::RandomMatrix()
 template <typename T, int N>
 RandomMatrix<T, N>::RandomMatrix(T *flatMat, const unsigned dimensions, ...) 
 {
-    this->setDimensions(dimensions);          
-    this->flatMat.insert(this->flatMat.begin(), flatMat, flatMat + this->flatSize());            
+    this->setDimensions(dimensions);        
+    this->flatMat.resize(this->flatSize());
 }
 template <typename T, int N>
 T* RandomMatrix<T, N>::rawData()
@@ -92,10 +93,35 @@ template <int RANDMAX> void
 RandomMatrix<T, N>::fill(const unsigned dimensions, ...) 
 {              
     this->setDimensions(dimensions);
-    std::cout << "Flat size: " << this->flatSize() << std::endl;
+    unsigned flatSize = this->flatSize();
+    // Why is this UB without the print?
     this->flatMat.resize(this->flatSize());
+    std::cout << "Capacity: " << this->flatSize()  << std::endl;
     std::generate(this->flatMat.begin(), this->flatMat.end(), [](){                
         return rand() / ((T) RANDMAX);
     });            
     
+}
+
+// TimeMeasurment
+TimeMeasurement::TimeMeasurement(int resolution) {
+    this ->resolution = resolution;
+}
+int TimeMeasurement::start() 
+{    
+    return gettimeofday(&this->tstart, NULL);
+}
+int TimeMeasurement::stop() 
+{
+    return gettimeofday(&this->tend, NULL);
+}
+long int TimeMeasurement::elapsed() 
+{
+    struct timeval &t2 = this->tend;
+    struct timeval &t1 = this->tstart;
+    long int diff = (
+        (t2.tv_usec + this->resolution * t2.tv_sec) - 
+        (t1.tv_usec + this->resolution * t1.tv_sec)
+    );
+    return diff > 0 ? diff : -1;
 }

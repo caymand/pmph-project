@@ -1,24 +1,37 @@
 #include <iostream>
 #include "helpers.h"
+#include "goldenSeq.h"
+#include <vector>
+
 
 int main() 
 {
-    constexpr int N = 10;
-    int r1[N];
-    int r2[N];
-    std::fill_n(r1, N, 1);
-    std::fill_n(r2, N, 2);
+    constexpr int float_range = RAND_MAX / 10;
+    constexpr int n = 1000;
+    constexpr int m = 1000;
+    constexpr int k = 1000;
     
-    RandomMatrix<float, 3> A; // Float matrix with 3 dimensions
-    // For int use RANDMAX = 10
-    constexpr int RANDMAX = RAND_MAX / 10; // [0, 10) range]
-    A.fill<RANDMAX>(2, 3, 4); // fill a 2 x 3 x 4 matrix
+    double total_ops = 2.0f * m * k * n;
 
-    RandomMatrix<int, 1> B(r1, N);
-    RandomMatrix<int, 1> C;
-    C.fill<RAND_MAX>(N);
-
-    Validator<int> validator(B.rawData(), C.rawData(), N);    
-    validator.validate();
+    RandomMatrix<float, 2> A;
+    RandomMatrix<float, 2> B;
+    A.fill<float_range>(n, m);
+    B.fill<float_range>(m, k);
+    std::vector<float> C(n * k);
     
-}
+    TimeMeasurement t;
+    
+    t.start();
+    goldenSeq<float>(A.rawData(), B.rawData(), C.data(), n, k, m);
+    t.stop();
+    
+    if (C[0] == 0.0f)  {
+        std::cout << "Should not be the case" << std::endl;
+    }
+
+    float us = t.elapsed() ;
+    std::cout << "Ran in " << us << " microseconds" << std::endl;
+    if (printGFlops(us, total_ops)) {
+        std::cout << "ERROR" << std::endl;
+    }
+}   

@@ -2,18 +2,20 @@
 #include <iostream>
 #include <numeric>
 #include <algorithm>
+#include <sys/time.h>
 
 template <typename T, int N>
 class RandomMatrix
 {
     private:
         unsigned seed;
-        std::vector<T> flatMat;
+        // std::vector<T> flatMat;
         std::vector<unsigned> dimensions;
         unsigned flatSize();
         void setDimensions(const unsigned dimensions, ...);
 
     public:        
+        std::vector<T> flatMat;
         RandomMatrix();
         RandomMatrix(T *flatMat, const unsigned dimensions, ...);
         T* rawData();
@@ -34,5 +36,37 @@ class Validator
         void setEps(int);
         void validate();
 };
+
+class TimeMeasurement
+{
+    private:
+        int resolution;
+        timeval tstart;
+        timeval tend;        
+    public:
+        TimeMeasurement(int resolution = 1000000);
+        int start();
+        int stop();
+        long int elapsed();
+        
+};
+
+int printPerformanceMetric(long int elapsed_time_us, unsigned long total, const char *metric_name) 
+{
+    double elapsed_sec = elapsed_time_us * 1e-6f;
+    double metric = (total / elapsed_sec) * 1.0e-9f; // make it in Giga scale
+    std::cout << metric_name << " : " << metric << std::endl;
+    return metric < 0;
+}
+int printGBSec(long int elapsed_time_us, unsigned long total_memsize) 
+{
+    return printPerformanceMetric(elapsed_time_us, total_memsize, "GB/sec");
+}
+
+int printGFlops(long int elapsed_time_us, unsigned long total_flops) 
+{
+    return printPerformanceMetric(elapsed_time_us, total_flops, "GFlops/sec");
+}
+
 
 #include "helpers.tpp"
