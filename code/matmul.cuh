@@ -9,6 +9,9 @@
 template <class ElTp, int Ty, int Ry, int Tx, int Rx, int Tk>
 __global__ void matMulTiled(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB, int widthA) {
 
+  int gid = threadIdx.x + threadIdx.y * blockDim.x;
+  if (gid >= widthA * heightA || gid >= widthA * widthB) { return; }
+
   // remapping (a slice of) A to shared memory
   __shared__ ElTp Aloc[Ty*Ry][Tk+1];
 

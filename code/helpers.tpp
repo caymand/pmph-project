@@ -13,7 +13,7 @@ Validator<T>::Validator(T *flatMat1, T* flatMat2, int N)
     this->eps = 0.0000000001; // e-10
 }
 template <typename T>
-void Validator<T>::setEps(int eps) {
+void Validator<T>::setEps(float eps) {
     this->eps = eps;
 }
 
@@ -38,11 +38,9 @@ void Validator<T>::validate()
     }
     std::cout << "INVALID" << std::endl;
     std::cout << "-------" << std::endl;
-    std::cout << "Found: " << errorCount << " ";
-    std::cout << "wrong elements." << std::endl;
+    std::printf("Found: %d wrong elements\n", errorCount);
     std::cout << "First at flat index: " << firstError << std::endl;
-    std::cout << "Expected: " << this->flatMat1[firstError] << " ";
-    std::cout << "got: " << this->flatMat2[firstError] << std::endl;
+    std::printf("Expected %.5f, got %.5f\n", this->flatMat1[firstError], this->flatMat2[firstError]);
 }
 
 // RandomMatrix
@@ -92,8 +90,9 @@ T* RandomMatrix<T, N>::to_gpu()
     void *gpu_mem;
     if (!gpuAssert(cudaMalloc(&gpu_mem, this->flatSize() * sizeof(T)))) 
     {
-        exit(1);
+        std::cout << "GPU memory allocation error" << std::endl;     
     }
+    gpuAssert(cudaMemcpy(gpu_mem, this->to_cpu(), sizeof(T) * this->flatSize(), cudaMemcpyHostToDevice));
     return (T *) gpu_mem;
 }
 

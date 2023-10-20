@@ -11,8 +11,7 @@ class RandomMatrix
     private:
         unsigned seed;
         std::vector<T> flatMat;
-        std::vector<unsigned> dimensions;
-        unsigned flatSize();
+        std::vector<unsigned> dimensions;        
         void setDimensions(const unsigned dimensions, ...);
 
     public:                
@@ -20,6 +19,7 @@ class RandomMatrix
         RandomMatrix(T *flatMat, const unsigned dimensions, ...);
         T* to_cpu();
         T* to_gpu();
+        unsigned flatSize();
         RandomMatrix<T, N>& setSeed(unsigned s);        
         template <int RANDMAX> void fill(const unsigned dimensions, ...);                
 };
@@ -34,7 +34,7 @@ class Validator
         float eps;
     public:
         Validator(T *flatMat1, T *flatMat2, int N);
-        void setEps(int);
+        void setEps(float);
         void validate();
 };
 
@@ -73,9 +73,9 @@ int gpuAssert(cudaError_t code)
 {
     if(code != cudaSuccess) {
         printf("GPU Error: %s\n", cudaGetErrorString(code));
-        return -1;
+        return 0;
     }
-    return 0;
+    return 1;
 }
 
 
