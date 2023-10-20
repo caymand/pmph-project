@@ -33,6 +33,7 @@ int main(int argc, char * argv[]) {
             Ahost.to_gpu(), Bhost.to_gpu(), Chost.to_gpu(), n, k, m);
         cudaDeviceSynchronize();
         t.stop();
+        std::cout << "Checking error" << std::endl;
         gpuAssert( cudaPeekAtLastError() );
     }
 
