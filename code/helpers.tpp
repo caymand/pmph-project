@@ -49,11 +49,18 @@ void Validator<T>::validate()
 template <typename T, int N>
 unsigned RandomMatrix<T, N>::flatSize() 
 {
-    return std::accumulate(
-        this->dimensions.begin(), this->dimensions.end(), 
-        1, 
-        std::multiplies<T>()
-    );
+    unsigned acc = 1;
+
+    for (auto dim : this->dimensions) {
+        acc *= dim;
+    }
+    return acc;
+
+//    return std::accumulate(
+//        this->dimensions.begin(), this->dimensions.end(),
+//        1,
+//        std::multiplies<T>()
+//    );
 }
 template <typename T, int N>
 void RandomMatrix<T, N>::setDimensions(const unsigned dimensions, ...) 
@@ -108,11 +115,13 @@ RandomMatrix<T, N>::fill(const unsigned dimensions, ...)
 {              
     this->setDimensions(dimensions);
     unsigned flatSize = this->flatSize();
+
+
     // Why is this UB without the print?
     this->flatMat.resize(this->flatSize());
     std::cout << "Capacity: " << this->flatSize()  << std::endl;
     std::generate(this->flatMat.begin(), this->flatMat.end(), [](){                
-        return rand() / ((T) RANDMAX);
+        return (T) (rand() / ((float) RANDMAX));
     });            
     
 }

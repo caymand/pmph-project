@@ -46,7 +46,7 @@ __global__ void matMulTiled(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB, 
         uint32_t slice_x = kk + threadIdx.x;// This is [kk: kk + Tk] 
 
         bool insideBounds = (slice_y < heightA) && (slice_x < widthA);
-        Aloc[local_y][local_x] = insideBounds ? A[slice_y * widthA + slice_x] : 0.0f;
+        Aloc[local_y][local_x] = insideBounds ? A[slice_y * widthA + slice_x] : (ElTp) 0.0;
       }
       
       #pragma unroll
@@ -58,7 +58,7 @@ __global__ void matMulTiled(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB, 
           uint32_t slice_x = jjj + local_x; // [jjj : jjj + Tx*Rx] 
           
           bool insideBounds = (slice_y < widthA) && (slice_x < widthB);
-          Bloc[local_y][local_x] = insideBounds ? B[slice_y * widthB + slice_x] : 0.0f;  
+          Bloc[local_y][local_x] = insideBounds ? B[slice_y * widthB + slice_x] : (ElTp) 0.0;
       }
 
       __syncthreads();
