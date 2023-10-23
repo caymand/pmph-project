@@ -9,24 +9,27 @@
 
 int main(int argc, char * argv[]) {
     constexpr int float_range = RAND_MAX / 10;
-    constexpr int n = 2048;
-    constexpr int m = 4096;
-    constexpr int k = 2048;
-    int dimy = ceil( ((float)n)/(32 * 5) ); 
-    int dimx = ceil( ((float) k)/(32 * 5) );
-    
-    double total_ops = 2.0f * m * k * n;
+    constexpr int n = 16 * 5 * 24;// Multiple of 8 to allign with frame leading dimension
+    constexpr int m = 16 * 5 * 24;// Multiple of 8 to allign with frame leading dimension
+    constexpr int k = 16 * 5 * 24;// Multiple of 8 to allign with frame leading dimension
+    constexpr int tile_size = 16;
+    constexpr int reg_size = 5;
+    constexpr int n_runs = 1;
+    constexpr double total_ops = 2.0f * m * k * n;
 
+    int dimy = ceil( ((float)n)/(tile_size * reg_size) ); 
+    int dimx = ceil( ((float) k)/(tile_size * reg_size) );
+    
     // Allocate 3 matrices with random data
     RandomMatrix<float, 2> Ahost;
     RandomMatrix<float, 2> Bhost;
     RandomMatrix<float, 2> Chost;
-    RandomMatrix<float, 2> Cdevice;
+    RandomMatrix<float, 2> Dhost;
     
     Ahost.fill<float_range>(n, m);
     Bhost.fill<float_range>(m, k);
     Chost.fill<float_range>(n, k);
-    Cdevice.fill<float_range>(n, k);
+    Dhost.fill<float_range>(n, k);
 
     TimeMeasurement t;
 
@@ -35,33 +38,32 @@ int main(int argc, char * argv[]) {
     goldenSeq<float>(Ahost.to_cpu(), Bhost.to_cpu(), Chost.to_cpu(), n, k, m);
     t.stop();
 
-    unsigned int elapsed = t.elapsed();
-    printGFlops(elapsed, total_ops);
+    printGFlops(t.elapsed(), total_ops);
 
     std::cout << "Running on GPU:" << std::endl;
     auto Adevice = Ahost.to_gpu();
     auto Bdevice = Bhost.to_gpu();
-    auto Cdev = Chost.to_gpu();
+    auto Ddevice = Dhost.to_gpu();
 
     dim3 grid(dimx, dimy, 1);
-    dim3 block(32, 32, 1);
-
+    dim3 block(tile_size, tile_size, 1);
+    
     t.start();
     {
-        matMulTiled<float, 32, 5, 32, 5, 32><<<grid, block>>>(
-            Adevice, Bdevice, Cdev, n, k, m);
+        for (int i = 0; i < n_runs; i++) {
+            matMulTiled<float, tile_size, reg_size, tile_size, reg_size, tile_size><<<grid, block>>>(
+                Adevice, Bdevice, Ddevice, n, k, m);
+        }
         cudaDeviceSynchronize();
     }
     t.stop();
-
-    cudaMemcpy(Cdevice.to_cpu(), Cdev, Cdevice.flatSize() * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaFree(Adevice); cudaFree(Bdevice); cudaFree(Cdev);
+    cudaMemcpy(Dhost.to_cpu(), Ddevice, Dhost.flatSize() * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaFree(Adevice); cudaFree(Bdevice); cudaFree(Ddevice);
     gpuAssert( cudaPeekAtLastError() );
 
-    elapsed = t.elapsed();
-    printGFlops(elapsed, total_ops);
+    printGFlops(t.elapsed(), total_ops * n_runs);
 
-    Validator<float> validator(Chost.to_cpu(), Cdevice.to_cpu(), n * k);
+    Validator<float> validator(Chost.to_cpu(), Dhost.to_cpu(), n * k);
     validator.setEps(0.000005);
     validator.validate();
 
