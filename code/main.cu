@@ -17,21 +17,15 @@
 
 
 
-template <typename elmT, int block_tile_size, int n_runs, int wmma_n, int wmma_m, int wmma_k, typename elmAccT = elmT>
+template <typename elmT, int threads_per_block, int block_tiles_m, int block_tiles_n, int block_tiles_k, int n_runs, int wmma_n, int wmma_m, int wmma_k, typename elmAccT = elmT>
 unsigned benchmark_tiled_tensor_mmm(
         elmT *A_device,
         elmT *B_device,
         elmAccT *ResMat_device,
-        int height_A,
-        int width_B,
-        int width_A)
+        int m,
+        int n,
+        int k)
 {
-
-    constexpr int threads_per_block = 256;
-    constexpr int block_tiles_m = 2;
-    constexpr int block_tiles_n = 2;
-    constexpr int block_tiles_k = 4;
-
     constexpr unsigned int A_loc_m = block_tiles_m * wmma_m;
     constexpr unsigned int A_loc_k = wmma_k * (block_tiles_k + 1);
 
@@ -44,9 +38,10 @@ unsigned benchmark_tiled_tensor_mmm(
     constexpr int copies_per_thread_A = (A_loc_m * A_loc_k + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_B = (B_loc_k * B_loc_n + threads_per_block) / threads_per_block;
 
-    int dimx = ceil( ((float) n * m)/(block_tiles_m * wmma_m * block_tiles_n * wmma_n));
+    int dimx = ceil( ((float) n)/(block_tiles_n * wmma_n));
+    int dimy = ceil( ((float) m)/(block_tiles_m * wmma_m));
 
-    dim3 grid(dimx, 1, 1);
+    dim3 grid(dimx, dimy, 1);
     dim3 block(threads_per_block, 1, 1);
 
 
@@ -55,8 +50,8 @@ unsigned benchmark_tiled_tensor_mmm(
 
     t.start();
     for (int i = 0; i < n_runs; i++) {
-        matMulTiledTensor<elmAccT, elmT, wmma_m, wmma_n, wmma_k, block_tile_size><<<grid, block>>>(
-                A_device, B_device, ResMat_device, height_A, width_B, width_B
+        matMulTiledTensor<elmAccT, elmT, wmma_m, wmma_n, wmma_k, block_tiles_m, block_tiles_n, block_tiles_k, copies_per_thread_A, copies_per_thread_B><<<grid, block>>>(
+                A_device, B_device, ResMat_device, m, n, n
         );
     }
     cudaDeviceSynchronize();
@@ -97,9 +92,9 @@ unsigned benchmark_tiled_mmm(
 }
 
 // Expects A to have shape K x K and B to have K x N
-template <typename elmT, int tile_size, int reg_size, int MatDim, int n_runs, bool use_tensor_cores>
+template <typename elmT, int tile_size, int reg_size, int MatDim, int n_runs, bool use_tensor_cores, typename elmAccT = elmT>
 //int reg_size, int n_runs = 1, int MatDim = 2, class accT = elmT>
-RandomMatrix<elmT, MatDim>* run_mmm_kernel(
+RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
         int height_A,
         int width_B,
         int width_A,
@@ -107,16 +102,25 @@ RandomMatrix<elmT, MatDim>* run_mmm_kernel(
         RandomMatrix<elmT, MatDim> &B)
 {
     double total_ops = 2.0f * width_B * width_A * height_A;
-    auto ResMat = new RandomMatrix<elmT, MatDim>;
+    auto ResMat = new RandomMatrix<elmAccT, MatDim>;
     // This took me like 2 hours to fix...
     ResMat->template fill<float_range>(height_A, width_B);
+
+    constexpr int threads_per_block = 256;
+    constexpr int block_tiles_m = 2;
+    constexpr int block_tiles_n = 2;
+    constexpr int block_tiles_k = 4;
+
+    constexpr int wmma_m = 16;
+    constexpr int wmma_n = 16;
+    constexpr int wmma_k = 16;
 
     auto A_device = A.to_gpu();
     auto B_device = B.to_gpu();
     auto ResMat_device = ResMat->to_gpu();
     unsigned total_elapsed;
     if constexpr(use_tensor_cores) {
-        total_elapsed = benchmark_tiled_tensor_mmm<elmT, tile_size, n_runs, 16, 16, 16>(
+        total_elapsed = benchmark_tiled_tensor_mmm<elmT, threads_per_block, block_tiles_m, block_tiles_n, block_tiles_k, n_runs, wmma_m, wmma_n, wmma_k, elmAccT>(
                 A_device, B_device, ResMat_device, height_A, width_B, width_A
         );
     }
@@ -174,7 +178,9 @@ int main(int argc, char * argv[]) {
     B_half.fill_from(B, width_A, width_B);
     constexpr int block_tile_size = 5; // TODO: calculate based on amount of shared memory
     std::cout << "Running GPU tensor version" << std::endl;
-    RandomMatrix<half, 2> *GPU_res_tensor_half = run_mmm_kernel<half, 5, 5, 2, 1, true>(
+
+//    TODO: check arguments
+    RandomMatrix<half, 2> *GPU_res_tensor_half = run_mmm_kernel<half, 16, 5, 2, 1, true>(
         height_A, width_A, width_B, A_half, B_half
     );
 
