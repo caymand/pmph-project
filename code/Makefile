@@ -14,8 +14,5 @@ all: $(MAIN) matmul-tensor
 $(MAIN): $(CFILES) $(HEADERS)
 	$(CXX) $(CXXFLAGS) $(CUFILES) $(CFILES) -o $(MAIN)
 
-matmul-tensor: matmul-tensor.cu
-	$(CXX) -o matmul-tensor matmul-tensor.cu
-
 clean:
 	- rm main

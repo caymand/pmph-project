@@ -73,7 +73,7 @@ int gpuAssert(cudaError_t code)
 {
     if(code != cudaSuccess) {
         printf("GPU Error: %s\n", cudaGetErrorString(code));
-        return 0;
+        exit(1);
     }
     return 1;
 }
