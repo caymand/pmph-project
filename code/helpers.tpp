@@ -2,7 +2,6 @@
 #include <sys/time.h>
 #include <algorithm>
 #include <cstdarg>
-//#include <cuda_runtime.h>
 
 // Validator
 template <typename T>
@@ -55,12 +54,6 @@ unsigned RandomMatrix<T, N>::flatSize()
         acc *= dim;
     }
     return acc;
-
-//    return std::accumulate(
-//        this->dimensions.begin(), this->dimensions.end(),
-//        1,
-//        std::multiplies<T>()
-//    );
 }
 template <typename T, int N>
 void RandomMatrix<T, N>::setDimensions(const unsigned dimensions, ...) 
@@ -80,10 +73,15 @@ RandomMatrix<T, N>::RandomMatrix()
 }
 
 template <typename T, int N>
-RandomMatrix<T, N>::RandomMatrix(T *flatMat, const unsigned dimensions, ...) 
+template <typename U>
+void RandomMatrix<T, N>::fill_from(RandomMatrix<U, N> &other, const unsigned dimensions, ...) 
 {
-    this->setDimensions(dimensions);        
-    this->flatMat.resize(this->flatSize());
+    this->setDimensions(dimensions);            
+    U *other_flat_mat = other.to_cpu();
+    for (int i = 0; i < other.flatSize(); i++) {
+        U v = other_flat_mat[i];
+        this->flatMat.push_back((T) v);
+    }        
 }
 template <typename T, int N>
 T* RandomMatrix<T, N>::to_cpu()
@@ -94,12 +92,14 @@ T* RandomMatrix<T, N>::to_cpu()
 template <typename T, int N>
 T* RandomMatrix<T, N>::to_gpu() 
 {
+
     void *gpu_mem;
-    if (!gpuAssert(cudaMalloc(&gpu_mem, this->flatSize() * sizeof(T)))) 
+    size_t n_bytes = this->flatSize() * sizeof(T);
+    if (!gpuAssert(cudaMalloc(&gpu_mem, n_bytes))) 
     {
         std::cout << "GPU memory allocation error" << std::endl;     
     }
-    gpuAssert(cudaMemcpy(gpu_mem, this->to_cpu(), sizeof(T) * this->flatSize(), cudaMemcpyHostToDevice));
+    gpuAssert(cudaMemcpy(gpu_mem, this->to_cpu(), n_bytes, cudaMemcpyHostToDevice));
     return (T *) gpu_mem;
 }
 
@@ -110,14 +110,10 @@ RandomMatrix<T, N>& RandomMatrix<T, N>::setSeed(unsigned s)
     return *this;
 }    
 template <typename T, int N>
-template <int RANDMAX> void 
-RandomMatrix<T, N>::fill(const unsigned dimensions, ...) 
+template <int RANDMAX> 
+void RandomMatrix<T, N>::fill(const unsigned dimensions, ...) 
 {              
     this->setDimensions(dimensions);
-    unsigned flatSize = this->flatSize();
-
-
-    // Why is this UB without the print?
     this->flatMat.resize(this->flatSize());
     std::cout << "Capacity: " << this->flatSize()  << std::endl;
     std::generate(this->flatMat.begin(), this->flatMat.end(), [](){                

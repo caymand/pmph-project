@@ -1,11 +1,12 @@
 # TODO: use other arch?
 CXX = nvcc #nvcc -O3 -arch=sm_80 # g++
-CXXFLAGS = -O3 -std=c++14 -arch=sm_80  #-Wall  -pedantic
-CFILES = main.cu
+CXXFLAGS = -O3 -std=c++17 -arch=sm_80  #-Wall  -pedantic
+CFILES = main.cu goldenSeq.cpp
 CUFILES = matmul.cu # matmul-tensor.cu
 HEADERS = matmul.cuh helpers.h helpers.tpp goldenSeq.h matmul-tensor.cuh
 
 MAIN = main
+GOLDEN_CPU = golden_cpu.o
 
 # depends on building the main file
 all: $(MAIN) matmul-tensor
