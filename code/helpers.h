@@ -5,6 +5,10 @@
 #include <sys/time.h>
 #include <cuda_runtime.h>
 
+constexpr int float_range = RAND_MAX ;
+
+int gpuAssert(cudaError_t code);
+
 template <typename T, int N>
 class RandomMatrix
 {
@@ -15,13 +19,13 @@ class RandomMatrix
         void setDimensions(const unsigned dimensions, ...);
 
     public:                
-        RandomMatrix();
-        RandomMatrix(T *flatMat, const unsigned dimensions, ...);
+        RandomMatrix();        
         T* to_cpu();
         T* to_gpu();
         unsigned flatSize();
         RandomMatrix<T, N>& setSeed(unsigned s);        
         template <int RANDMAX> void fill(const unsigned dimensions, ...);                
+        template <typename U> void fill_from(RandomMatrix<U, N> &other, const unsigned dimensions, ...);
 };
 
 
@@ -52,6 +56,8 @@ class TimeMeasurement
         
 };
 
+#include "helpers.tpp"
+
 int printPerformanceMetric(long int elapsed_time_us, unsigned long total, const char *metric_name) 
 {
     double elapsed_sec = elapsed_time_us * 1e-6f;
@@ -77,6 +83,3 @@ int gpuAssert(cudaError_t code)
     }
     return 1;
 }
-
-
-#include "helpers.tpp"
