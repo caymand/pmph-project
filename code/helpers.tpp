@@ -115,7 +115,7 @@ void RandomMatrix<T, N>::fill(const unsigned dimensions, ...)
 {              
     this->setDimensions(dimensions);
     this->flatMat.resize(this->flatSize());
-    std::cout << "Capacity: " << this->flatSize()  << std::endl;
+    // std::cout << "Capacity: " << this->flatSize()  << std::endl;
     std::generate(this->flatMat.begin(), this->flatMat.end(), [](){                
         return (T) (rand() / ((float) RANDMAX));
     });            

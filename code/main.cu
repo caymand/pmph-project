@@ -5,6 +5,7 @@
 #include "goldenSeq.h"
 #include "matmul-tensor.cuh"
 
+#define WARP_SIZE 32
 /*
 * block_tiles_m - how many elements to work on in the m direction
 * block_tiles_n - how many elements to work on in the n direction
@@ -19,34 +20,23 @@ unsigned benchmark_tiled_tensor_mmm(
         int n,
         int k)
 {
-    constexpr unsigned int A_loc_m = block_tiles_m * wmma_m;
-    //constexpr unsigned int A_loc_k = wmma_k * (block_tiles_k + 1);
-    constexpr unsigned int A_loc_k = wmma_k * block_tiles_k;
-
-    // remapping (a slice of) B to shared memory
-    constexpr unsigned int B_loc_k = block_tiles_k * wmma_k;
-    // constexpr unsigned int B_loc_n = wmma_n * (block_tiles_n + 1);
-    constexpr unsigned int B_loc_n = wmma_n * block_tiles_n;
-
-//    TODO: ensure A_loc_k and B_loc_n are multiples of warpSize
-    // Next we know that we calculate how many elements each thread will
-    // need to work on and we round up
-    constexpr int Tx = wmma_n;
-    constexpr int Ty = wmma_m;
-    // constexpr int copies_per_thread_A = (A_loc_m * A_loc_k + threads_per_block) / threads_per_block;
-    // constexpr int copies_per_thread_B = (B_loc_k * B_loc_n + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_A = 0, copies_per_thread_B = 0;
 
     // Let block work on block_tiles * wmma elements.
     // there are n elements on the x direction and we know each thread works on block_tiles_n
-    // int dimx = ceil( ((float) n)/(block_tiles_n * wmma_n)); 
-    // int dimy = ceil( ((float) m)/(block_tiles_m * wmma_m));
-    int dimx = ceil(((float) n)/(Tx * block_tiles_n)); 
-    int dimy = ceil( ((float) m)/(Ty * block_tiles_m));
+    int dimx = ceil(((float) n)/(wmma_n * block_tiles_n)); 
+    int dimy = ceil( ((float) m)/(wmma_m * block_tiles_m));
     
     dim3 grid(dimx, dimy, 1);
     // dim3 block(threads_per_block, 1, 1); // 1D block of 256 elements
-    dim3 block(Tx, Ty, 1);
+    /* Okay so what do we want? Each mm will be done by the entire warp and works warp level.
+    So whatever we want to tile for should be multiple of the warp size.
+    Here we say that the block should compute block_tiles_m x block_tiles_n tensor mm.
+
+    This also works for the grid specification, since we tile so that each warp computes
+    a wmma_m x wmma_n result, and we use block_tiles_m x block_tiles_n warps in the block.
+    */
+    dim3 block(block_tiles_n * WARP_SIZE, block_tiles_m, 1);
 
     TimeMeasurement t;
 
@@ -109,9 +99,9 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
     ResMat->template fill<float_range>(height_A, width_B);
 
     constexpr int threads_per_block = 256;
-    constexpr int block_tiles_m = 2;
-    constexpr int block_tiles_n = 2;
-    constexpr int block_tiles_k = 4;
+    constexpr int block_tiles_m = 4;
+    constexpr int block_tiles_n = 4;
+    constexpr int block_tiles_k = 1;
 
     constexpr int wmma_m = 16;
     constexpr int wmma_n = 16;
@@ -122,7 +112,10 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
     auto ResMat_device = ResMat->to_gpu();
     unsigned total_elapsed;
     if constexpr(use_tensor_cores) {
-        total_elapsed = benchmark_tiled_tensor_mmm<elmT, threads_per_block, block_tiles_m, block_tiles_n, block_tiles_k, n_runs, wmma_m, wmma_n, wmma_k, elmAccT>(
+        total_elapsed = benchmark_tiled_tensor_mmm<
+            elmT, threads_per_block, block_tiles_m, block_tiles_n, block_tiles_k, 
+            n_runs, wmma_m, wmma_n, wmma_k, elmAccT>
+            (
                 A_device, B_device, ResMat_device, height_A, width_B, width_A
         );
     }
@@ -131,11 +124,9 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
                 A_device, B_device, ResMat_device, height_A, width_B, width_A
         );
     }
-
-    cudaMemcpy(ResMat->to_cpu(), ResMat_device, ResMat->flatSize() * sizeof(elmT), cudaMemcpyDeviceToHost);
+    cudaMemcpy(ResMat->to_cpu(), ResMat_device, ResMat->flatSize() * sizeof(elmAccT), cudaMemcpyDeviceToHost);
     cudaFree(A_device); cudaFree(B_device); cudaFree(ResMat_device);
     gpuAssert( cudaPeekAtLastError() );
-
 
     if (!total_elapsed) {
         printf("Kernel launch failed\n");
@@ -146,32 +137,33 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
     return ResMat;
 }
 
-
-
-
-
 int main(int argc, char * argv[]) {
-    constexpr int width_A = 16 * 2;// Multiple of 8 to allign with frame leading dimension
-    constexpr int height_A = 16 * 2;// Multiple of 8 to allign with frame leading dimension
-    constexpr int width_B = 16 * 3;// Multiple of 8 to allign with frame leading dimension
-
+    constexpr int width_A = 16 * 256;// Multiple of 8 to allign with frame leading dimension
+    constexpr int height_A = 16 * 256;// Multiple of 8 to allign with frame leading dimension
+    constexpr int width_B = 16 * 256;// Multiple of 8 to allign with frame leading dimension
+    constexpr unsigned n_runs = 10;
     // Tiled GPU verion
     // TODO: this fails when the type is float since it is not supported for wmma
     // and the templated function is still created
     RandomMatrix<float, 2> A;
     RandomMatrix<float, 2> B;
-    RandomMatrix<float, 2> CPU_res;
     TimeMeasurement t;
     A.fill<float_range>(height_A, width_A);
     B.fill<float_range>(width_A, width_B);
-    CPU_res.fill<float_range>(height_A, width_B);
-    std::cout << "Running CPU version" << std::endl;
-    goldenSeq<float>(A.to_cpu(), B.to_cpu(), CPU_res.to_cpu(), height_A, width_B, width_A);
-    // RandomMatrix<float, 2> *CPU = run_mmm_kernel<float, 16, 5, 2, 1, false>(
-    //     height_A, width_B, width_A, A, B
-    // );
-    // RandomMatrix<float, 2> GPU_res_tiled;
-    // GPU_res_tiled.fill_from(*GPU_res_tiled_half, height_A * width_B);
+
+    std::cout << "-----" << std::endl;
+    std::cout << "Running GPU register tiled version" << std::endl;
+    std::cout << "Dry run" << std::endl;
+    run_mmm_kernel<float, 16, 5, 2, 1, false>(
+        height_A, width_B, width_A, A, B
+    );
+    std::cout << "Average run of: " << n_runs << std::endl;
+    RandomMatrix<float, 2> *C = run_mmm_kernel<float, 16, 5, 2, n_runs, false>(
+        height_A, width_B, width_A, A, B
+    );
+    RandomMatrix<float, 2> target_res;
+    target_res.fill_from(*C, height_A * width_B);
+    std::cout << "-----" << std::endl;
 
     // GPU version
     RandomMatrix<half, 2> A_half;
@@ -179,22 +171,27 @@ int main(int argc, char * argv[]) {
     A_half.fill_from(A, height_A, width_A);
     B_half.fill_from(B, width_A, width_B);
     constexpr int block_tile_size = 5; // TODO: calculate based on amount of shared memory
+    
+    std::cout << "-----" << std::endl;
     std::cout << "Running GPU tensor version" << std::endl;
-
-//    TODO: check arguments
-    RandomMatrix<half, 2> *GPU_res_tensor_half = run_mmm_kernel<half, 16, 5, 2, 1, true>(
+    std::cout << "Dry run" << std::endl;
+    run_mmm_kernel<half, 16, 5, 2, 1, true, float>(
         height_A, width_A, width_B, A_half, B_half
     );
+    std::cout << "Average run after: " << n_runs << " runs" << std::endl;
+    RandomMatrix<float, 2> *GPU_res_tensor_half = run_mmm_kernel<half, 16, 5, 2, n_runs, true, float>(
+        height_A, width_A, width_B, A_half, B_half
+    );
+    std::cout << "-----" << std::endl;
 
     RandomMatrix<float, 2> GPU_res_tensor;
     GPU_res_tensor.fill_from(*GPU_res_tensor_half, height_A, width_B);
 
-    Validator<float> validator(CPU_res.to_cpu(), GPU_res_tensor.to_cpu(), height_A * width_B);
-    // validator.setEps(0.000005);
-    validator.setEps(0.05);
+    Validator<float> validator(target_res.to_cpu(), GPU_res_tensor.to_cpu(), height_A * width_B);
+    // validator.setEps(0.000005); // original used by cosmin
+    validator.setEps(0.0005);
     validator.validate();
     delete GPU_res_tensor_half;
-    // delete GPU_res_tiled_half;
 
     return 0;
 }
