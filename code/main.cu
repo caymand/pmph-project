@@ -5,18 +5,11 @@
 #include "goldenSeq.h"
 #include "matmul-tensor.cuh"
 
-
-
-
-
-
-
-
-
-
-
-
-
+/*
+* block_tiles_m - how many elements to work on in the m direction
+* block_tiles_n - how many elements to work on in the n direction
+* block_tiles_k - how many elements to work on in the k direction
+*/
 template <typename elmT, int threads_per_block, int block_tiles_m, int block_tiles_n, int block_tiles_k, int n_runs, int wmma_n, int wmma_m, int wmma_k, typename elmAccT = elmT>
 unsigned benchmark_tiled_tensor_mmm(
         elmT *A_device,
@@ -27,39 +20,48 @@ unsigned benchmark_tiled_tensor_mmm(
         int k)
 {
     constexpr unsigned int A_loc_m = block_tiles_m * wmma_m;
-    constexpr unsigned int A_loc_k = wmma_k * (block_tiles_k + 1);
+    //constexpr unsigned int A_loc_k = wmma_k * (block_tiles_k + 1);
+    constexpr unsigned int A_loc_k = wmma_k * block_tiles_k;
 
     // remapping (a slice of) B to shared memory
     constexpr unsigned int B_loc_k = block_tiles_k * wmma_k;
-    constexpr unsigned int B_loc_n = wmma_n * (block_tiles_n + 1);
+    // constexpr unsigned int B_loc_n = wmma_n * (block_tiles_n + 1);
+    constexpr unsigned int B_loc_n = wmma_n * block_tiles_n;
 
 //    TODO: ensure A_loc_k and B_loc_n are multiples of warpSize
+    // Next we know that we calculate how many elements each thread will
+    // need to work on and we round up
+    constexpr int Tx = wmma_n;
+    constexpr int Ty = wmma_m;
+    // constexpr int copies_per_thread_A = (A_loc_m * A_loc_k + threads_per_block) / threads_per_block;
+    // constexpr int copies_per_thread_B = (B_loc_k * B_loc_n + threads_per_block) / threads_per_block;
+    constexpr int copies_per_thread_A = 0, copies_per_thread_B = 0;
 
-    constexpr int copies_per_thread_A = (A_loc_m * A_loc_k + threads_per_block) / threads_per_block;
-    constexpr int copies_per_thread_B = (B_loc_k * B_loc_n + threads_per_block) / threads_per_block;
-
-    int dimx = ceil( ((float) n)/(block_tiles_n * wmma_n));
-    int dimy = ceil( ((float) m)/(block_tiles_m * wmma_m));
-
+    // Let block work on block_tiles * wmma elements.
+    // there are n elements on the x direction and we know each thread works on block_tiles_n
+    // int dimx = ceil( ((float) n)/(block_tiles_n * wmma_n)); 
+    // int dimy = ceil( ((float) m)/(block_tiles_m * wmma_m));
+    int dimx = ceil(((float) n)/(Tx * block_tiles_n)); 
+    int dimy = ceil( ((float) m)/(Ty * block_tiles_m));
+    
     dim3 grid(dimx, dimy, 1);
-    dim3 block(threads_per_block, 1, 1);
-
+    // dim3 block(threads_per_block, 1, 1); // 1D block of 256 elements
+    dim3 block(Tx, Ty, 1);
 
     TimeMeasurement t;
 
-
     t.start();
     for (int i = 0; i < n_runs; i++) {
-        matMulTiledTensor<elmAccT, elmT, wmma_m, wmma_n, wmma_k, block_tiles_m, block_tiles_n, block_tiles_k, copies_per_thread_A, copies_per_thread_B><<<grid, block>>>(
-                A_device, B_device, ResMat_device, m, n, n
-        );
+        matMulTiledTensor<
+            elmAccT, elmT, wmma_m, wmma_n, wmma_k, block_tiles_m, block_tiles_n, 
+            block_tiles_k, copies_per_thread_A, copies_per_thread_B>
+            <<<grid, block>>>(A_device, B_device, ResMat_device, m, n, n);
     }
     cudaDeviceSynchronize();
     t.stop();
     // Check if kernel launch was successfull
-    if (!gpuAssert(cudaPeekAtLastError())) {
-        return 0;
-    }
+    gpuAssert(cudaPeekAtLastError());
+
     return t.elapsed();
 }
 template <typename elmT, int tile_size, int n_runs, int reg_size>
@@ -149,9 +151,9 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
 
 
 int main(int argc, char * argv[]) {
-    constexpr int width_A = 16 * 5 * 12;// Multiple of 8 to allign with frame leading dimension
-    constexpr int height_A = 16 * 5 * 12;// Multiple of 8 to allign with frame leading dimension
-    constexpr int width_B = 16 * 5 * 12;// Multiple of 8 to allign with frame leading dimension
+    constexpr int width_A = 16 * 2;// Multiple of 8 to allign with frame leading dimension
+    constexpr int height_A = 16 * 2;// Multiple of 8 to allign with frame leading dimension
+    constexpr int width_B = 16 * 3;// Multiple of 8 to allign with frame leading dimension
 
     // Tiled GPU verion
     // TODO: this fails when the type is float since it is not supported for wmma
