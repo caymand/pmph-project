@@ -81,8 +81,9 @@ void RandomMatrix<T, N>::fill_from(RandomMatrix<U, N> &other, const unsigned dim
     for (int i = 0; i < other.flatSize(); i++) {
         U v = other_flat_mat[i];
         this->flatMat.push_back((T) v);
-    }        
+    }
 }
+
 template <typename T, int N>
 T* RandomMatrix<T, N>::to_cpu()
 {
