@@ -12,7 +12,7 @@
 
 
 
-template <typename elmT, int block_tiles_m, int block_tiles_n, int block_tiles_k, int wmma_n, int wmma_m, int wmma_k, typename elmAccT = elmT>
+template <typename elmT, typename elmAccT = elmT>
 long int benchmark_tiled_tensor_mmm(
         int n_runs,
         elmT *A_device,
@@ -22,50 +22,46 @@ long int benchmark_tiled_tensor_mmm(
         int n,
         int k)
 {
-//    TODO: change if register tiling
-//
-    constexpr unsigned int threads_per_block = block_tiles_m * block_tiles_n * WARP_SIZE;
+    //    TODO: calculate block_tiles sizes based on threads per block?
+    constexpr int block_tiles_m = 2;
+    constexpr int block_tiles_n = 4;
+    constexpr int block_tiles_k = 1;
+
+    constexpr int warp_tiles_m = 2;
+    constexpr int warp_tiles_n = 2;
+//    TODO: currently not used, set to 1
+    constexpr int warp_tiles_k = 1;
+
+    constexpr int wmma_m = 16;
+    constexpr int wmma_n = 16;
+    constexpr int wmma_k = 16;
+
+
+//    constexpr unsigned int threads_per_block = 256;
+    constexpr unsigned int threads_per_block =  block_tiles_m * block_tiles_n * WARP_SIZE;
+    printf("Threads used: %d\n", threads_per_block);
     assert(threads_per_block <= 1024);
 
-    constexpr unsigned int A_loc_m = block_tiles_m * wmma_m;
-    constexpr unsigned int A_loc_k = wmma_k * block_tiles_k;
+    //    Assumes num_warps >= block_tiles_m * block_tiles_n, i.e. all block tiles are handled by a warp
+    assert(threads_per_block / WARP_SIZE >= block_tiles_m * block_tiles_n);
 
-    // remapping (a slice of) B to shared memory
-    constexpr unsigned int B_loc_k = block_tiles_k * wmma_k;
-    constexpr unsigned int B_loc_n = wmma_n * block_tiles_n;
-
-//    TODO: ensure A_loc_k and B_loc_n are multiples of warpSize
-
-    constexpr int copies_per_thread_A = (A_loc_m * A_loc_k + threads_per_block) / threads_per_block;
-    constexpr int copies_per_thread_B = (B_loc_k * B_loc_n + threads_per_block) / threads_per_block;
-
-    int dimx = ceil( ((float) n)/(block_tiles_n * wmma_n));
-    int dimy = ceil( ((float) m)/(block_tiles_m * wmma_m));
+    int dimx = ceil( ((float) n)/(wmma_n * warp_tiles_n * block_tiles_n));
+    int dimy = ceil( ((float) m)/(wmma_m * warp_tiles_m * block_tiles_m));
 
     dim3 grid(dimx, dimy, 1);
     dim3 block(threads_per_block, 1, 1);
 
-//  TODO: change if we do register tiling
-    //    Assumes num_warps >= block_tiles_m * block_tiles_n
-    assert(threads_per_block / WARP_SIZE >= block_tiles_m * block_tiles_n);
-
-
-//    printf("m: %d, n: %d, threads_m: %d, threads_n: %d\n", m, n, dimy * block_tiles_m * wmma_m, dimx * block_tiles_n * wmma_n);
-//    printf("A_loc size: %d, work A: %d\n", A_loc_m * A_loc_k, threads_per_block * copies_per_thread_A);
-//    printf("B_loc size: %d, work B: %d\n", B_loc_k * B_loc_n, threads_per_block * copies_per_thread_B);
-
-
     TimeMeasurement t;
-
 
     t.start();
     for (int i = 0; i < n_runs; i++) {
-        matMulTiledTensor<elmAccT, elmT, wmma_m, wmma_n, wmma_k, block_tiles_m, block_tiles_n, block_tiles_k, copies_per_thread_A, copies_per_thread_B><<<grid, block>>>(
+        matMulTiledTensor<elmAccT, elmT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, warp_tiles_k, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block><<<grid, block>>>(
                 A_device, B_device, ResMat_device, m, n, k
         );
     }
     cudaDeviceSynchronize();
     t.stop();
+
     // Check if kernel launch was successfull
     gpuAssert(cudaPeekAtLastError());
     return t.elapsed();
@@ -116,22 +112,13 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
     // This took me like 2 hours to fix...
     ResMat->fill(0, m, n);
 
-    //    TODO: calculate block_tiles sizes based on threads per block?
-    constexpr int block_tiles_m = 4;
-    constexpr int block_tiles_n = 8;
-    constexpr int block_tiles_k = 2;
-
-    constexpr int wmma_m = 16;
-    constexpr int wmma_n = 16;
-    constexpr int wmma_k = 16;
-
     auto A_device = A.to_gpu();
     auto B_device = B.to_gpu();
 
     auto ResMat_device = ResMat->to_gpu();
     long int total_elapsed;
     if constexpr(use_tensor_cores) {
-        total_elapsed = benchmark_tiled_tensor_mmm<elmT, block_tiles_m, block_tiles_n, block_tiles_k, wmma_m, wmma_n, wmma_k, elmAccT>(
+        total_elapsed = benchmark_tiled_tensor_mmm<elmT, elmAccT>(
                 n_runs, A_device, B_device, ResMat_device, m, n, k
         );
     }

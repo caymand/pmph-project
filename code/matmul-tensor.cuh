@@ -12,100 +12,125 @@
 
 using namespace nvcuda;
 
-template <class accType, class elmType, int wmma_m, int wmma_n, int wmma_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int copies_per_thread_A, int copies_per_thread_B>
+template <class accType, class elmType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int warp_tiles_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
 __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
-    constexpr unsigned int A_loc_m = block_tiles_m * wmma_m;
-    constexpr unsigned int A_loc_k = wmma_k * block_tiles_k;
+    constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
+    constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
+    constexpr unsigned int shared_k = wmma_k * warp_tiles_k * block_tiles_k;
+//    TODO: use warp_tiles_k
+
+    constexpr int copies_per_thread_A = (shared_m * shared_k + threads_per_block) / threads_per_block;
+    constexpr int copies_per_thread_B = (shared_k * shared_n + threads_per_block) / threads_per_block;
+
     //    Pad to avoid bank conflicts
-    constexpr unsigned int A_loc_k_true = A_loc_k + 8;
-    __shared__ elmType A_loc[A_loc_m][A_loc_k_true];
+    constexpr unsigned int A_shared_k_true = shared_k + 8;
+    __shared__ elmType A_shared[shared_m][A_shared_k_true];
 
   // remapping (a slice of) B to shared memory
-    constexpr unsigned int B_loc_k = block_tiles_k * wmma_k;
-    constexpr unsigned int B_loc_n = wmma_n * block_tiles_n;
     //    Pad to avoid bank conflicts
-    constexpr unsigned int B_loc_n_true = B_loc_n + 8;
-    __shared__ elmType B_loc[B_loc_k][B_loc_n_true];
+    constexpr unsigned int B_shared_n_true = shared_n + 8;
+    __shared__ elmType B_shared[shared_k][B_shared_n_true];
 
-    unsigned int block_start_m = blockIdx.y * block_tiles_m * wmma_m;
-    unsigned int block_start_n = blockIdx.x * block_tiles_n * wmma_n;
+    unsigned int block_m_global_offset = blockIdx.y * shared_m;
+    unsigned int block_n_global_offset = blockIdx.x * shared_n;
 
     unsigned int warpID = threadIdx.x / warpSize;
     unsigned int laneID = threadIdx.x % warpSize;
 
 //    Assumes num_warps >= block_tiles_m * block_tiles_n
-    unsigned int warpID_m = warpID / block_tiles_n;
-    unsigned int warpID_n = warpID % block_tiles_n;
+//    TODO: change name and value
+    unsigned int warp_m_index = warpID / block_tiles_n;
+    unsigned int warp_n_index = warpID % block_tiles_n;
 
-    unsigned int ind_m = block_start_m + warpID_m * wmma_m;
-    unsigned int ind_n = block_start_n + warpID_n * wmma_n;
+//    TODO: change name and value
+    unsigned int warp_m_global_offset = block_m_global_offset + warp_m_index * wmma_m * warp_tiles_m;
+    unsigned int warp_n_global_offset = block_n_global_offset + warp_n_index * wmma_n * warp_tiles_n;
 
-    for (int global_offset_k = 0; global_offset_k < k; global_offset_k += block_tiles_k * wmma_k) {
+    for (int global_k_offset = 0; global_k_offset < k; global_k_offset += shared_k) {
 //      Copy data to shared memory
         #pragma unroll
         for (int i = 0; i < copies_per_thread_A; i++) {
-            int tile_i = threadIdx.x + i * blockDim.x;
-            int tile_m = tile_i / A_loc_k;
-            int tile_k = tile_i % A_loc_k;
-            int A_m = block_start_m + tile_m;
-            int A_k = global_offset_k + tile_k;
+            unsigned int tile_i = threadIdx.x + i * blockDim.x;
+            unsigned int tile_m_index = tile_i / shared_k;
+            unsigned int tile_k_index = tile_i % shared_k;
+            unsigned int A_m_index = block_m_global_offset + tile_m_index;
+            unsigned int A_k_index = global_k_offset + tile_k_index;
 
-            if (tile_m < A_loc_m && tile_k < A_loc_k) {
-                A_loc[tile_m][tile_k] = A_m < m && A_k < k ? A[A_m * k + A_k] : (elmType) 0.0;
+            if (tile_m_index < shared_m && tile_k_index < shared_k) {
+                A_shared[tile_m_index][tile_k_index] = A_m_index < m && A_k_index < k ? A[A_m_index * k + A_k_index] : (elmType) 0.0;
             }
         }
 
         #pragma unroll
         for (int i = 0; i < copies_per_thread_B; i++) {
-            int tile_i = threadIdx.x + i * blockDim.x;
-            int tile_k = tile_i / B_loc_n;
-            int tile_n = tile_i % B_loc_n;
-            int B_k = global_offset_k + tile_k;
-            int B_n = block_start_n + tile_n;
+            unsigned int tile_i = threadIdx.x + i * blockDim.x;
+            unsigned int tile_k_index = tile_i / shared_n;
+            unsigned int tile_n_index = tile_i % shared_n;
+            unsigned int B_k_index = global_k_offset + tile_k_index;
+            unsigned int B_n_index = block_n_global_offset + tile_n_index;
 
-            if (tile_k < B_loc_k && tile_n < B_loc_n) {
-                B_loc[tile_k][tile_n] = B_k < k && B_n < n ? B[B_k * n + B_n] : (elmType) 0.0f;
+            if (tile_k_index < shared_k && tile_n_index < shared_n) {
+                B_shared[tile_k_index][tile_n_index] = B_k_index < k && B_n_index < n ? B[B_k_index * n + B_n_index] : (elmType) 0.0f;
             }
         }
 
         __syncthreads();
 //      End of copy to shared memory
 
-//        TODO: check or not?
-        if (ind_m < m && ind_n < n)
+//        TODO: move check into loop?
+        if (warp_m_global_offset < m && warp_n_global_offset < n)
         {
             // compute the per-thread result css:
             //    TODO: move this into loop to free registers for use in copy
             // the thread result is computed in register memory
             // and the global-memory array C is updated at the end.
-            wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag;
+            wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
 
 //          Assumes C is initialized to zero
-            wmma::load_matrix_sync(C_frag, &C[ind_m * n + ind_n], n, wmma::mem_row_major);
-
-            //        TODO: #pragma unroll?
-            for (int local_offset_k = 0; local_offset_k < block_tiles_k * wmma_k; local_offset_k += wmma_k)
+            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i += 1)
             {
-                //            TODO: check col_major vs row_major
-                wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag;
-                wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag;
-
-                //            TODO: tile this to reuse loaded fragments?
-                wmma::load_matrix_sync(A_frag, &A_loc[warpID_m * wmma_m][local_offset_k], A_loc_k_true);
-                wmma::load_matrix_sync(B_frag, &B_loc[local_offset_k][warpID_n * wmma_n], B_loc_n_true);
-
-                wmma::mma_sync(C_frag, A_frag, B_frag, C_frag);
+                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i += 1)
+                {
+                    int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
+                    int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
+                    wmma::load_matrix_sync(C_frag[warp_m_offset_i][warp_n_offset_i], &C[m_index * n + n_index], n, wmma::mem_row_major);
+                }
             }
 
-            wmma::store_matrix_sync(&C[ind_m * n + ind_n], C_frag, n, wmma::mem_row_major);
+            //        TODO: #pragma unroll?
+            for (int local_k_offset = 0; local_k_offset < block_tiles_k * wmma_k; local_k_offset += wmma_k)
+            {
+                wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[warp_tiles_m];
+                wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[warp_tiles_n];
+                for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i += 1)
+                {
+                    wmma::load_matrix_sync(A_frag[warp_m_offset_i], &A_shared[warp_m_index * wmma_m * warp_tiles_m + warp_m_offset_i * wmma_m][local_k_offset], A_shared_k_true);
+
+                    for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i += 1)
+                    {
+                        wmma::load_matrix_sync(B_frag[warp_n_offset_i], &B_shared[local_k_offset][warp_n_index * wmma_n * warp_tiles_n + warp_n_offset_i * wmma_n], B_shared_n_true);
+                        wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i], A_frag[warp_m_offset_i], B_frag[warp_n_offset_i], C_frag[warp_m_offset_i][warp_n_offset_i]);
+                    }
+                }
+            }
+
+            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i += 1)
+            {
+                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i += 1)
+                {
+                    int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
+                    int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
+                    wmma::store_matrix_sync(&C[m_index * n + n_index], C_frag[warp_m_offset_i][warp_n_offset_i], n, wmma::mem_row_major);
+                }
+            }
         }
         __syncthreads();
     }
 
     // Update C in global memory with the per-thread result css.
 //    TODO: handle warp matrices that are not full? should pad differently when copying to shared memory
-//    if (ind_m < m && ind_n < n) {
-//        wmma::store_matrix_sync(&C[ind_m * n + ind_n], C_frag, n, wmma::mem_row_major);
+//    if (warp_m_global_offset < m && warp_n_global_offset < n) {
+//        wmma::store_matrix_sync(&C[warp_m_global_offset * n + warp_n_global_offset], C_frag, n, wmma::mem_row_major);
 //    }
 }
 
