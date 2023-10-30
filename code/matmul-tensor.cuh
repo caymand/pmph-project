@@ -26,7 +26,7 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
     constexpr unsigned int A_shared_k_true = shared_k + 8;
     __shared__ elmType A_shared[shared_m][A_shared_k_true];
 
-  // remapping (a slice of) B to shared memory
+    // remapping (a slice of) B to shared memory
     //    Pad to avoid bank conflicts
     constexpr unsigned int B_shared_n_true = shared_n + 8;
     __shared__ elmType B_shared[shared_k][B_shared_n_true];
@@ -38,11 +38,9 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
     unsigned int laneID = threadIdx.x % warpSize;
 
 //    Assumes num_warps >= block_tiles_m * block_tiles_n
-//    TODO: change name and value
     unsigned int warp_m_index = warpID / block_tiles_n;
     unsigned int warp_n_index = warpID % block_tiles_n;
 
-//    TODO: change name and value
     unsigned int warp_m_global_offset = block_m_global_offset + warp_m_index * wmma_m * warp_tiles_m;
     unsigned int warp_n_global_offset = block_n_global_offset + warp_n_index * wmma_n * warp_tiles_n;
 
@@ -81,7 +79,6 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
         if (warp_m_global_offset < m && warp_n_global_offset < n)
         {
             // compute the per-thread result css:
-            //    TODO: move this into loop to free registers for use in copy
             // the thread result is computed in register memory
             // and the global-memory array C is updated at the end.
             wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
@@ -126,12 +123,6 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
         }
         __syncthreads();
     }
-
-    // Update C in global memory with the per-thread result css.
-//    TODO: handle warp matrices that are not full? should pad differently when copying to shared memory
-//    if (warp_m_global_offset < m && warp_n_global_offset < n) {
-//        wmma::store_matrix_sync(&C[warp_m_global_offset * n + warp_n_global_offset], C_frag, n, wmma::mem_row_major);
-//    }
 }
 
 

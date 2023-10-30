@@ -23,8 +23,9 @@ long int benchmark_tiled_tensor_mmm(
         int k)
 {
     //    TODO: calculate block_tiles sizes based on threads per block?
-    constexpr int block_tiles_m = 2;
+    constexpr int block_tiles_m = 4;
     constexpr int block_tiles_n = 4;
+//    TODO: calculate maximum possible block_tiles_k based on shared memory size
     constexpr int block_tiles_k = 1;
 
     constexpr int warp_tiles_m = 2;
@@ -37,7 +38,6 @@ long int benchmark_tiled_tensor_mmm(
     constexpr int wmma_k = 16;
 
 
-//    constexpr unsigned int threads_per_block = 256;
     constexpr unsigned int threads_per_block =  block_tiles_m * block_tiles_n * WARP_SIZE;
     printf("Threads used: %d\n", threads_per_block);
     assert(threads_per_block <= 1024);
