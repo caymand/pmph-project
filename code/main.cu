@@ -24,9 +24,9 @@ long int benchmark_tiled_tensor_mmm(
 {
     //    TODO: calculate block_tiles sizes based on threads per block?
     constexpr int block_tiles_m = 4;
-    constexpr int block_tiles_n = 4;
+    constexpr int block_tiles_n = 2;
 //    TODO: calculate maximum possible block_tiles_k based on shared memory size
-    constexpr int block_tiles_k = 1;
+    constexpr int block_tiles_k = 2;
 
     constexpr int warp_tiles_m = 2;
     constexpr int warp_tiles_n = 2;

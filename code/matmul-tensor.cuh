@@ -12,6 +12,8 @@
 
 using namespace nvcuda;
 
+// TODO: check reads coalesced, try C in shared memory, check store is coalesced
+
 template <class accType, class elmType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int warp_tiles_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
 __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
@@ -72,6 +74,9 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
             }
         }
 
+
+//            TODO: cahce C in shared memory?
+
         __syncthreads();
 //      End of copy to shared memory
 
@@ -84,9 +89,11 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
             wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
 
 //          Assumes C is initialized to zero
-            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i += 1)
+            #pragma unroll
+            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
             {
-                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i += 1)
+                #pragma unroll
+                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                 {
                     int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
                     int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
@@ -99,11 +106,12 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
             {
                 wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[warp_tiles_m];
                 wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[warp_tiles_n];
-                for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i += 1)
+                #pragma unroll
+                for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
                 {
                     wmma::load_matrix_sync(A_frag[warp_m_offset_i], &A_shared[warp_m_index * wmma_m * warp_tiles_m + warp_m_offset_i * wmma_m][local_k_offset], A_shared_k_true);
-
-                    for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i += 1)
+                    #pragma unroll
+                    for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                     {
                         wmma::load_matrix_sync(B_frag[warp_n_offset_i], &B_shared[local_k_offset][warp_n_index * wmma_n * warp_tiles_n + warp_n_offset_i * wmma_n], B_shared_n_true);
                         wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i], A_frag[warp_m_offset_i], B_frag[warp_n_offset_i], C_frag[warp_m_offset_i][warp_n_offset_i]);
@@ -111,9 +119,11 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
                 }
             }
 
-            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i += 1)
+            #pragma unroll
+            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
             {
-                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i += 1)
+                #pragma unroll
+                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                 {
                     int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
                     int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
