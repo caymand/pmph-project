@@ -40,16 +40,6 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
     unsigned int ind_m = block_start_m + warpID_m * wmma_m;
     unsigned int ind_n = block_start_n + warpID_n * wmma_n;
 
-
-//    TODO: move this into loop to free registers for use in copy
-    // the thread result is computed in register memory
-    // and the global-memory array C is updated at the end.
-    wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag;
-
-    // initialize the result with zero
-    // (the neutral element for addition)
-    wmma::fill_fragment(C_frag, 0.0f);
-
     for (int global_offset_k = 0; global_offset_k < k; global_offset_k += block_tiles_k * wmma_k) {
 //      Copy data to shared memory
         #pragma unroll
@@ -81,10 +71,18 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
         __syncthreads();
 //      End of copy to shared memory
 
-        // compute the per-thread result css:
 //        TODO: check or not?
         if (ind_m < m && ind_n < n)
         {
+            // compute the per-thread result css:
+            //    TODO: move this into loop to free registers for use in copy
+            // the thread result is computed in register memory
+            // and the global-memory array C is updated at the end.
+            wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag;
+
+//          Assumes C is initialized to zero
+            wmma::load_matrix_sync(C_frag, &C[ind_m * n + ind_n], n, wmma::mem_row_major);
+
             //        TODO: #pragma unroll?
             for (int local_offset_k = 0; local_offset_k < block_tiles_k * wmma_k; local_offset_k += wmma_k)
             {
@@ -98,15 +96,17 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
 
                 wmma::mma_sync(C_frag, A_frag, B_frag, C_frag);
             }
+
+            wmma::store_matrix_sync(&C[ind_m * n + ind_n], C_frag, n, wmma::mem_row_major);
         }
         __syncthreads();
     }
 
     // Update C in global memory with the per-thread result css.
 //    TODO: handle warp matrices that are not full? should pad differently when copying to shared memory
-    if (ind_m < m && ind_n < n) {
-        wmma::store_matrix_sync(&C[ind_m * n + ind_n], C_frag, n, wmma::mem_row_major);
-    }
+//    if (ind_m < m && ind_n < n) {
+//        wmma::store_matrix_sync(&C[ind_m * n + ind_n], C_frag, n, wmma::mem_row_major);
+//    }
 }
 
 

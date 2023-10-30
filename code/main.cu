@@ -114,12 +114,12 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
     double total_ops = 2.0f * n * k * m;
     auto ResMat = new RandomMatrix<elmAccT, MatDim>;
     // This took me like 2 hours to fix...
-    ResMat->template fill<float_range>(m, n);
+    ResMat->fill(0, m, n);
 
     //    TODO: calculate block_tiles sizes based on threads per block?
     constexpr int block_tiles_m = 4;
     constexpr int block_tiles_n = 8;
-    constexpr int block_tiles_k = 1;
+    constexpr int block_tiles_k = 2;
 
     constexpr int wmma_m = 16;
     constexpr int wmma_n = 16;
@@ -181,14 +181,14 @@ int main(int argc, char * argv[])
     RandomMatrix<float, 2> A;
     RandomMatrix<float, 2> B;
     TimeMeasurement t;
-    A.fill<float_range>(m, k);
-    B.fill<float_range>(k, n);
+    A.fill_rand<float_range>(m, k);
+    B.fill_rand<float_range>(k, n);
 
     std::cout << "-----" << std::endl;
     std::cout << "Running GPU register tiled version" << std::endl;
     std::cout << "Dry run" << std::endl;
     run_mmm_kernel<float, 16, 5, 2, false>(
-            n_runs, m, n, k, A, B
+            1, m, n, k, A, B
     );
     std::cout << "Average run of: " << n_runs << std::endl;
     RandomMatrix<float, 2> *C = run_mmm_kernel<float, 16, 5, 2, false>(
@@ -209,22 +209,24 @@ int main(int argc, char * argv[])
     std::cout << "-----" << std::endl;
     std::cout << "Running GPU tensor version" << std::endl;
     std::cout << "Dry run" << std::endl;
-    run_mmm_kernel<half, 16, 5, 2, true, float>(
-            n_runs, m, n, k, A_half, B_half
-    );
-    std::cout << "Average run after: " << n_runs << " runs"<< std::endl;
     RandomMatrix<float, 2> *GPU_res_tensor_half = run_mmm_kernel<half, 16, 5, 2, true, float>(
+            1, m, n, k, A_half, B_half
+    );
+
+    RandomMatrix<float, 2> GPU_res_tensor;
+    GPU_res_tensor.fill_from(*GPU_res_tensor_half, m, n);
+    Validator<float> validator(target_res.to_cpu(), GPU_res_tensor.to_cpu(), m * n);
+    // validator.setEps(0.000005); // original used by cosmin
+    validator.setEps(0.0005);
+
+    std::cout << "Average run after: " << n_runs << " runs"<< std::endl;
+    run_mmm_kernel<half, 16, 5, 2, true, float>(
             n_runs, m, n, k, A_half, B_half
     );
     std::cout << "-----" << std::endl;
 
-    RandomMatrix<float, 2> GPU_res_tensor;
-    GPU_res_tensor.fill_from(*GPU_res_tensor_half, m, n);
-
-    Validator<float> validator(target_res.to_cpu(), GPU_res_tensor.to_cpu(), m * n);
-    // validator.setEps(0.000005); // original used by cosmin
-    validator.setEps(0.0005);
     validator.validate();
+
     delete GPU_res_tensor_half;
 
     return 0;
@@ -242,9 +244,9 @@ int main(int argc, char * argv[])
 //    RandomMatrix<float, 2> B;
 //    RandomMatrix<float, 2> CPU_res;
 //    TimeMeasurement t;
-//    A.fill<float_range>(m, k);
-//    B.fill<float_range>(k, n);
-//    CPU_res.fill<float_range>(m, n);
+//    A.fill_rand<float_range>(m, k);
+//    B.fill_rand<float_range>(k, n);
+//    CPU_res.fill_rand<float_range>(m, n);
 //    std::cout << "Running GPU version" << std::endl;
 //
 //

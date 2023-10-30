@@ -24,8 +24,10 @@ class RandomMatrix
         T* to_gpu();
         unsigned flatSize();
         RandomMatrix<T, N>& setSeed(unsigned s);        
-        template <int RANDMAX> void fill(const unsigned dimensions, ...);                
+        template <int RANDMAX> void fill_rand(const unsigned dimensions, ...);
         template <typename U> void fill_from(RandomMatrix<U, N> &other, const unsigned dimensions, ...);
+
+        void fill(T value, const unsigned int dimensions, ...);
 };
 
 

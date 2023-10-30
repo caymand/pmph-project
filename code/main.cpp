@@ -15,8 +15,8 @@ int main()
 
     RandomMatrix<float, 2> A;
     RandomMatrix<float, 2> B;
-    A.fill<float_range>(n, m);
-    B.fill<float_range>(m, k);
+    A.fill_rand<float_range>(n, m);
+    B.fill_rand<float_range>(m, k);
     std::vector<float> C(n * k);
     
     TimeMeasurement t;

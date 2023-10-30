@@ -112,15 +112,23 @@ RandomMatrix<T, N>& RandomMatrix<T, N>::setSeed(unsigned s)
 }    
 template <typename T, int N>
 template <int RANDMAX> 
-void RandomMatrix<T, N>::fill(const unsigned dimensions, ...) 
+void RandomMatrix<T, N>::fill_rand(const unsigned dimensions, ...)
 {              
     this->setDimensions(dimensions);
     this->flatMat.resize(this->flatSize());
     std::cout << "Capacity: " << this->flatSize()  << std::endl;
     std::generate(this->flatMat.begin(), this->flatMat.end(), [](){                
         return (T) (rand() / ((float) RANDMAX));
-    });            
-    
+    });
+}
+
+template <typename T, int N>
+void RandomMatrix<T, N>::fill(T value, const unsigned dimensions, ...)
+{
+    this->setDimensions(dimensions);
+    this->flatMat.resize(this->flatSize());
+    std::cout << "Capacity: " << this->flatSize()  << std::endl;
+    std::fill(this->flatMat.begin(), this->flatMat.end(), 0);
 }
 
 // TimeMeasurment
