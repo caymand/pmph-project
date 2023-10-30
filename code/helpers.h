@@ -60,8 +60,11 @@ class TimeMeasurement
 
 int printPerformanceMetric(long int elapsed_time_us, unsigned long total, const char *metric_name) 
 {
-    double elapsed_sec = elapsed_time_us * 1e-6f;
-    double metric = (total / elapsed_sec) * 1.0e-9f; // make it in Giga scale
+//    double elapsed_sec = elapsed_time_us * 1e-6f;
+//    double metric = (total / elapsed_sec) * 1.0e-9f; // make it in Giga scale
+
+//    double elapsed_sec = elapsed_time_us * 1e-6f;
+    double metric = (total / elapsed_time_us) * 1.0e-3f; // make it in Giga scale
     std::cout << metric_name << " : " << metric << std::endl;
     return metric < 0;
 }

@@ -1,6 +1,6 @@
 
-#ifndef MULT_KERNELS
-#define MULT_KERNELS
+#ifndef MULT_kERNELS
+#define MULT_kERNELS
 #include <stdint.h>
 #include <mma.h>
 using namespace nvcuda;
@@ -15,7 +15,7 @@ __global__ void matMulTiled(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB, 
   __shared__ ElTp Aloc[Ty*Ry][Tk+1];
 
   // remapping (a slice of) B to shared memory
-  __shared__ ElTp Bloc[Tk][Tx*Rx+1]; 
+  __shared__ ElTp Bloc[Tk][Tx*Rx+1];
 
   // the thread result is computed in register memory
   // and the global-memory array C is updated at the end.
@@ -35,25 +35,25 @@ __global__ void matMulTiled(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB, 
   for(int kk = 0; kk < widthA; kk += Tk) {
       #pragma unroll
       for (uint32_t r = 0; r < Ry; r++) {
-        // Stack R blocks of size Ty x Tx on top of each other          
+        // Stack R blocks of size Ty x Tx on top of each other
         uint32_t local_x = threadIdx.x;
-        uint32_t local_y = threadIdx.y + Ty * r; // stack Ry blocks on top of each other          
+        uint32_t local_y = threadIdx.y + Ty * r; // stack Ry blocks on top of each other
 
         uint32_t slice_y = iii + local_y; // this gives [iii : iii + Ty*Ry]
-        uint32_t slice_x = kk + threadIdx.x;// This is [kk: kk + Tk] 
+        uint32_t slice_x = kk + threadIdx.x;// This is [kk: kk + Tk]
 
         bool insideBounds = (slice_y < heightA) && (slice_x < widthA);
         Aloc[local_y][local_x] = insideBounds ? A[slice_y * widthA + slice_x] : (ElTp) 0.0;
       }
-      
+
       #pragma unroll
-      for (uint32_t r = 0; r < Rx; r++) {          
+      for (uint32_t r = 0; r < Rx; r++) {
           uint32_t local_y = threadIdx.y;
           uint32_t local_x = threadIdx.x + Tx*r; // stack Rx blocks next to each other
 
-          uint32_t slice_y = kk + threadIdx.y;// [kk : kk + Tk] 
-          uint32_t slice_x = jjj + local_x; // [jjj : jjj + Tx*Rx] 
-          
+          uint32_t slice_y = kk + threadIdx.y;// [kk : kk + Tk]
+          uint32_t slice_x = jjj + local_x; // [jjj : jjj + Tx*Rx]
+
           bool insideBounds = (slice_y < widthA) && (slice_x < widthB);
           Bloc[local_y][local_x] = insideBounds ? B[slice_y * widthB + slice_x] : (ElTp) 0.0;
       }
@@ -68,7 +68,7 @@ __global__ void matMulTiled(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB, 
               for(int j=0; j<Rx; j++) {
                 float Aik = Aloc[threadIdx.y * Ry + i][k];
                 float Bkj = Bloc[k][threadIdx.x * Rx + j];
-                css[i][j] += Aik * Bkj;                
+                css[i][j] += Aik * Bkj;
 
               }
           }
@@ -96,20 +96,20 @@ __global__ void matMulTensor(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB,
   int gid = threadIdx.x + threadIdx.y * blockDim.x;
   if (gid >= widthA * heightA || gid >= widthA * widthB) { return; }
   // These are the fragment sizes
-  constexpr int WMMA_M = 16, WMMA_N = 16, WMMA_K = 16;
-  // Leading axis size for matrix A, B and C 
-  constexpr int lda = WMMA_M, ldb = WMMA_K, ldc = WMMA_K;
+  constexpr int WMMA_M = 16, WMMA_N = 16, WMMA_k = 16;
+  // Leading axis size for matrix A, B and C
+  constexpr int lda = WMMA_M, ldb = WMMA_k, ldc = WMMA_k;
   // remapping (a slice of) A to shared memory
   __shared__ ElHalfTp Aloc[Ty*Ry][Tk+1];
 
   // remapping (a slice of) B to shared memory
-  __shared__ ElHalfTp Bloc[Tk][Tx*Rx+1]; 
+  __shared__ ElHalfTp Bloc[Tk][Tx*Rx+1];
 
   // Fragments
-  wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, ElHalfTp, wmma::row_major> a_frag;
-  wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, ElHalfTp, wmma::row_major> b_frag;  
+  wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_k, ElHalfTp, wmma::row_major> a_frag;
+  wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_k, ElHalfTp, wmma::row_major> b_frag;
   // We need it to be in an array because we do "warp tiling" to increase register usage
-  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, ElTp> c_frag[Ry][Rx];
+  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_k, ElTp> c_frag[Ry][Rx];
   // the thread result is computed in register memory
   // and the global-memory array C is updated at the end.
   // ElTp css[Ry][Rx];
@@ -135,25 +135,25 @@ __global__ void matMulTensor(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB,
   for(int kk = 0; kk < widthA; kk += Tk) {
       #pragma unroll
       for (uint32_t r = 0; r < Ry; r++) {
-        // Stack R blocks of size Ty x Tx on top of each other          
+        // Stack R blocks of size Ty x Tx on top of each other
         uint32_t local_x = threadIdx.x;
-        uint32_t local_y = threadIdx.y + Ty * r; // stack Ry blocks on top of each other          
+        uint32_t local_y = threadIdx.y + Ty * r; // stack Ry blocks on top of each other
 
         uint32_t slice_y = iii + local_y; // this gives [iii : iii + Ty*Ry]
-        uint32_t slice_x = kk + threadIdx.x;// This is [kk: kk + Tk] 
+        uint32_t slice_x = kk + threadIdx.x;// This is [kk: kk + Tk]
 
         bool insideBounds = (slice_y < heightA) && (slice_x < widthA);
         Aloc[local_y][local_x] = (ElHalfTp)(insideBounds ? A[slice_y * widthA + slice_x] : 0.0f);
       }
-      
+
       #pragma unroll
-      for (uint32_t r = 0; r < Rx; r++) {          
+      for (uint32_t r = 0; r < Rx; r++) {
           uint32_t local_y = threadIdx.y;
           uint32_t local_x = threadIdx.x + Tx*r; // stack Rx blocks next to each other
 
-          uint32_t slice_y = kk + threadIdx.y;// [kk : kk + Tk] 
-          uint32_t slice_x = jjj + local_x; // [jjj : jjj + Tx*Rx] 
-          
+          uint32_t slice_y = kk + threadIdx.y;// [kk : kk + Tk]
+          uint32_t slice_x = jjj + local_x; // [jjj : jjj + Tx*Rx]
+
           bool insideBounds = (slice_y < widthA) && (slice_x < widthB);
           Bloc[local_y][local_x] = (ElHalfTp)(insideBounds ? B[slice_y * widthB + slice_x] : 0.0f);  
       }
@@ -192,7 +192,7 @@ __global__ void matMulTensor(ElTp* A, ElTp* B, ElTp* C, int heightA, int widthB,
       if( (indy+i < heightA) && (indx+j < widthB) ) {
         // C[(indy+i)*widthB + (indx+j)] = css[i][j];
         ElTp *c_ptr = C + (indy + i)*widthB + indx+j;
-        wmma::store_matrix_sync(c_ptr, c_frag[i][j], WMMA_K * Rx, wmma::mem_row_major);
+        wmma::store_matrix_sync(c_ptr, c_frag[i][j], WMMA_k * Rx, wmma::mem_row_major);
       }
     }
   }
