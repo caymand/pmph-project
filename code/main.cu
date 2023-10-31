@@ -102,8 +102,8 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
     ResMat->template fill<float_range>(height_A, width_B);
 
     constexpr int threads_per_block = 256;
-    constexpr int block_tiles_m = 8;
-    constexpr int block_tiles_n = 4;
+    constexpr int block_tiles_m = 1;
+    constexpr int block_tiles_n = 1;
     constexpr int block_tiles_k = 1;
 
     constexpr int wmma_m = 16;
