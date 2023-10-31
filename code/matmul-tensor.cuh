@@ -5,9 +5,6 @@
 #ifndef CODE_MATMUL_TENSOR_CUH
 #define CODE_MATMUL_TENSOR_CUH
 
-//#define CACHE_C
-//#define KEEP_C
-
 
 #include <stdint.h>
 #include <mma.h>

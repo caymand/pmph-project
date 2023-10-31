@@ -9,7 +9,7 @@
 
 
 #define WARP_SIZE 32
-
+#define SHARED_MEM_SIZE 49152
 
 
 template <typename elmT, typename elmAccT = elmT>
@@ -84,20 +84,35 @@ long int benchmark_tiled_tensor_mmm(
     constexpr int block_tiles_k = 2;
 #endif
 
-
-
     constexpr unsigned int threads_per_block = block_tiles_m * block_tiles_n * WARP_SIZE;
     printf("Threads used: %d\n", threads_per_block);
     assert(threads_per_block <= 1024);
     //    Assumes num_warps >= block_tiles_m * block_tiles_n, i.e. all block tiles are handled by a warp
     assert(threads_per_block / WARP_SIZE >= block_tiles_m * block_tiles_n);
-//    TODO: try more than one tile per warp? would allow increasing sharing without increasing block size, but maybe this is already done by k dimension tiling?
+//    TODO: try more than one tile per warp?
+//    Would allow increasing sharing without increasing block size, but maybe this is already done by k dimension tiling?
+//    Would maybe allow more concurrent blocks? Would mean less threads for copying memory
 
     int dimx = ceil(((float) n)/(wmma_n * warp_tiles_n * block_tiles_n));
     int dimy = ceil(((float) m)/(wmma_m * warp_tiles_m * block_tiles_m));
 
     dim3 grid(dimx, dimy, 1);
     dim3 block(threads_per_block, 1, 1);
+
+    constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
+    constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
+    constexpr unsigned int shared_k = wmma_k * warp_tiles_k * block_tiles_k;
+
+    constexpr unsigned int shared_memory_used_AB = shared_m * (shared_k + 8) * sizeof(elmT) + shared_k * (shared_n + 8) * sizeof(elmT);
+#ifdef CACHE_C
+//    Add space for caching C
+    constexpr unsigned int shared_memory_used = shared_memory_used_AB + shared_m * (shared_n + 8) * sizeof(elmAccT);
+#else
+    constexpr unsigned int shared_memory_used = shared_memory_used_AB;
+#endif
+    printf("Shared memory used: %d/%d bytes (%.0f%)\n", shared_memory_used, SHARED_MEM_SIZE, (float) shared_memory_used / SHARED_MEM_SIZE * 100);
+//  TODO: calculate register usage?
+
 
     TimeMeasurement t;
 
