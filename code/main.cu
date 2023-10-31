@@ -212,18 +212,34 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
 
 int main(int argc, char * argv[])
 {
-    constexpr int m = 16 * 256;
-    constexpr int n = 16 * 256;
+    int m = 16 * 256;
+    int n = 16 * 256;
 //    TODO: does not work if this is different, fix that
-    constexpr int k = 16 * 256;
+    int k = 16 * 256;
 
-    int n_runs;
+    int n_runs = 10;
 
-    if (argc == 2)
+    if (argc >= 2)
     {
         n_runs = atoi(argv[1]);
-    } else {
-        n_runs = 10;
+    }
+    if (argc == 3)
+    {
+        int input_int = atoi(argv[2]);
+        m = input_int;
+        n = input_int;
+        k = input_int;
+    } else if (argc == 4)
+    {
+        m = atoi(argv[1]);
+        n = atoi(argv[2]);
+        k = atoi(argv[3]);
+    } else if (argc == 5)
+    {
+        n_runs = atoi(argv[1]);
+        m = atoi(argv[2]);
+        n = atoi(argv[3]);
+        k = atoi(argv[4]);
     }
 
     // Tiled GPU verion
