@@ -10,6 +10,7 @@
 
 #define WARP_SIZE 32
 #define SHARED_MEM_SIZE 49152
+#define MAX_THREADS_PER_BLOCK 1024
 
 
 template <typename elmT, typename elmAccT = elmT>
@@ -85,8 +86,8 @@ long int benchmark_tiled_tensor_mmm(
 #endif
 
     constexpr unsigned int threads_per_block = block_tiles_m * block_tiles_n * WARP_SIZE;
-    printf("Threads used: %d\n", threads_per_block);
-    assert(threads_per_block <= 1024);
+    printf("Threads used: %d/%d\n", threads_per_block, MAX_THREADS_PER_BLOCK);
+    assert(threads_per_block <= MAX_THREADS_PER_BLOCK);
     //    Assumes num_warps >= block_tiles_m * block_tiles_n, i.e. all block tiles are handled by a warp
     assert(threads_per_block / WARP_SIZE >= block_tiles_m * block_tiles_n);
 //    TODO: try more than one tile per warp?
