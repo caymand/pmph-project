@@ -11,6 +11,9 @@
 #define WARP_SIZE 32
 #define SHARED_MEM_SIZE 49152
 #define MAX_THREADS_PER_BLOCK 1024
+#define MAX_REGISTERS_PER_BLOCK 65536
+
+#define SHARED_PADDING 8
 
 
 template <typename elmT, typename elmAccT = elmT>
@@ -100,19 +103,29 @@ long int benchmark_tiled_tensor_mmm(
     dim3 grid(dimx, dimy, 1);
     dim3 block(threads_per_block, 1, 1);
 
+    //  TODO: calculate register usage?
+    printf("Available registers per thread: %d (%d per block)\n", MAX_REGISTERS_PER_BLOCK / threads_per_block, MAX_REGISTERS_PER_BLOCK);
+
     constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
     constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
     constexpr unsigned int shared_k = wmma_k * warp_tiles_k * block_tiles_k;
 
-    constexpr unsigned int shared_memory_used_AB = shared_m * (shared_k + 8) * sizeof(elmT) + shared_k * (shared_n + 8) * sizeof(elmT);
+//    assert(m % wmma_m == 0 && m % wmma_m * warp_tiles_m == 0 && m % wmma_m * warp_tiles_m * block_tiles_m == 0);
+//    assert(n % wmma_n == 0 && n % wmma_n * warp_tiles_n == 0 && n % wmma_n * warp_tiles_n * block_tiles_n == 0);
+//    assert(k % wmma_k == 0 && k % wmma_k * warp_tiles_k == 0 && k % wmma_k * warp_tiles_k * block_tiles_k == 0);
+//    printf("%d %d %d\n", m % wmma_m, m % wmma_m * warp_tiles_m, m % wmma_m * warp_tiles_m * block_tiles_m);
+//    printf("%d %d %d\n", n % wmma_n, n % wmma_n * warp_tiles_n, n % wmma_n * warp_tiles_n * block_tiles_n);
+//    printf("%d %d %d\n", k % wmma_k, k % wmma_k * warp_tiles_k, k % wmma_k * warp_tiles_k * block_tiles_k);
+
+
+    constexpr unsigned int shared_memory_used_AB = shared_m * (shared_k + SHARED_PADDING) * sizeof(elmT) + shared_k * (shared_n + SHARED_PADDING) * sizeof(elmT);
 #ifdef CACHE_C
 //    Add space for caching C
-    constexpr unsigned int shared_memory_used = shared_memory_used_AB + shared_m * (shared_n + 8) * sizeof(elmAccT);
+    constexpr unsigned int shared_memory_used = shared_memory_used_AB + shared_m * (shared_n + SHARED_PADDING) * sizeof(elmAccT);
 #else
     constexpr unsigned int shared_memory_used = shared_memory_used_AB;
 #endif
     printf("Shared memory used: %d/%d bytes (%.0f%)\n", shared_memory_used, SHARED_MEM_SIZE, (float) shared_memory_used / SHARED_MEM_SIZE * 100);
-//  TODO: calculate register usage?
 
 
     TimeMeasurement t;
@@ -298,72 +311,4 @@ int main(int argc, char * argv[])
     delete GPU_res_tensor_half;
 
     return 0;
-
-
-
-//    constexpr int k = 16 * 256;// Multiple of 8 to allign with frame leading dimension
-//    constexpr int m = 16 * 256;// Multiple of 8 to allign with frame leading dimension
-//    constexpr int n = 16 * 256;// Multiple of 8 to allign with frame leading dimension
-//
-//    // Tiled GPU verion
-//    // TODO: this fails when the type is float since it is not supported for wmma
-//    // and the templated function is still created
-//    RandomMatrix<float, 2> A;
-//    RandomMatrix<float, 2> B;
-//    RandomMatrix<float, 2> CPU_res;
-//    TimeMeasurement t;
-//    A.fill_rand<float_range>(m, k);
-//    B.fill_rand<float_range>(k, n);
-//    CPU_res.fill_rand<float_range>(m, n);
-//    std::cout << "Running GPU version" << std::endl;
-//
-//
-//     RandomMatrix<float, 2> *CPU = run_mmm_kernel<float, 16, 5, 2, 1, false>(
-//         m, n, k, A, B
-//     );
-//     RandomMatrix<float, 2> GPU_res_tiled;
-//     GPU_res_tiled.fill_from(*GPU_res_tiled_half, m * n);
-//
-//    // GPU version
-//    RandomMatrix<half, 2> A_half;
-//    RandomMatrix<half, 2> B_half;
-//    A_half.fill_from(A, m, k);
-//    B_half.fill_from(B, k, n);
-//    constexpr int block_tile_size = 5; // TODO: calculate based on amount of shared memory
-//    std::cout << "Running GPU tensor version" << std::endl;
-//
-////    TODO: check arguments
-//    RandomMatrix<half, 2> *GPU_res_tensor_half = run_mmm_kernel<half, 16, 5, 2, 1, true>(
-//        m, k, n, A_half, B_half
-//    );
-//
-//    RandomMatrix<float, 2> GPU_res_tensor;
-//    GPU_res_tensor.fill_from(*GPU_res_tensor_half, m, n);
-//
-//    Validator<float> validator(CPU_res.to_cpu(), GPU_res_tensor.to_cpu(), m * n);
-//
-////    print C:
-////    printf("C CPU:\n");
-////    for (int i = 0; i < m; i++) {
-////        for (int j = 0; j < n; j++) {
-////            std::cout << CPU_res.to_cpu()[i * n + j] << " ";
-////        }
-////        std::cout << std::endl;
-////    }
-////
-////    printf("C GPU:\n");
-////    for (int i = 0; i < m; i++) {
-////        for (int j = 0; j < n; j++) {
-////            std::cout << GPU_res_tensor.to_cpu()[i * n + j] << " ";
-////        }
-////        std::cout << std::endl;
-////    }
-//
-//    // validator.setEps(0.000005);
-//    validator.setEps(0.05);
-//    validator.validate();
-//    delete GPU_res_tensor_half;
-//    // delete GPU_res_tiled_half;
-//
-//    return 0;
 }
