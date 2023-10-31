@@ -239,7 +239,8 @@ int main(int argc, char * argv[])
     A_half.fill_from(A, m, k);
     B_half.fill_from(B, k, n);
 
-    constexpr int block_tile_size = 5; // TODO: calculate based on amount of shared memory
+//    TODO: remove?
+//    constexpr int block_tile_size = 5; // TODO: calculate based on amount of shared memory
 
     std::cout << "-----" << std::endl;
     std::cout << "Running GPU tensor version" << std::endl;

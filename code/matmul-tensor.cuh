@@ -27,14 +27,13 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
 
     constexpr int copies_per_thread_A = (shared_m * shared_k + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_B = (shared_k * shared_n + threads_per_block) / threads_per_block;
-    constexpr int copies_per_thread_C = (shared_m * shared_n + threads_per_block) / threads_per_block;
 
 //    TODO: try moving these to use?
     unsigned int block_m_global_offset = blockIdx.y * shared_m;
     unsigned int block_n_global_offset = blockIdx.x * shared_n;
 
     unsigned int warpID = threadIdx.x / warpSize;
-    unsigned int laneID = threadIdx.x % warpSize;
+//    unsigned int laneID = threadIdx.x % warpSize;
 
 //    Assumes num_warps >= block_tiles_m * block_tiles_n
     unsigned int warp_m_index = warpID / block_tiles_n;
@@ -55,6 +54,8 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
     __shared__ elmType B_shared[shared_k][B_shared_n_true];
 
 #ifdef CACHE_C
+    constexpr int copies_per_thread_C = (shared_m * shared_n + threads_per_block) / threads_per_block;
+
     //    Pad to avoid bank conflicts
     constexpr unsigned int C_shared_n_true = shared_n + 8;
     __shared__ accType C_shared[shared_m][C_shared_n_true];
