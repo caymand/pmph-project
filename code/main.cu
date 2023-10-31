@@ -22,27 +22,26 @@ long int benchmark_tiled_tensor_mmm(
         int n,
         int k)
 {
-    //    TODO: calculate block_tiles sizes based on threads per block?
-    constexpr int block_tiles_m = 2;
-    constexpr int block_tiles_n = 2;
-//    TODO: calculate maximum possible block_tiles_k based on shared memory size
-    constexpr int block_tiles_k = 2;
-
-    constexpr int warp_tiles_m = 2;
-    constexpr int warp_tiles_n = 2;
-//    TODO: currently not used, set to 1
-    constexpr int warp_tiles_k = 1;
-
+//    TODO: calculate maximum possible block_tiles_k based on shared memory size? similarly calculate warp_tiles_k based on availible registers
+//    TODO: calculate m and n dimensions based on optimal block size?
     constexpr int wmma_m = 16;
     constexpr int wmma_n = 16;
     constexpr int wmma_k = 16;
 
-    constexpr unsigned int threads_per_block =  block_tiles_m * block_tiles_n * WARP_SIZE;
+    constexpr int warp_tiles_m = 1;
+    constexpr int warp_tiles_n = 1;
+    constexpr int warp_tiles_k = 1;
+
+    constexpr int block_tiles_m = 2;
+    constexpr int block_tiles_n = 2;
+    constexpr int block_tiles_k = 2;
+
+    constexpr unsigned int threads_per_block = block_tiles_m * block_tiles_n * WARP_SIZE;
     printf("Threads used: %d\n", threads_per_block);
     assert(threads_per_block <= 1024);
     //    Assumes num_warps >= block_tiles_m * block_tiles_n, i.e. all block tiles are handled by a warp
     assert(threads_per_block / WARP_SIZE >= block_tiles_m * block_tiles_n);
-//    TODO: try more than one tile per warp? would allow increasing sharing without increasing block size
+//    TODO: try more than one tile per warp? would allow increasing sharing without increasing block size, but maybe this is already done by k dimension tiling?
 
     int dimx = ceil(((float) n)/(wmma_n * warp_tiles_n * block_tiles_n));
     int dimy = ceil(((float) m)/(wmma_m * warp_tiles_m * block_tiles_m));
