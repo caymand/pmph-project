@@ -16,8 +16,7 @@
 
 using namespace nvcuda;
 
-// TODO: check reads coalesced, try C in shared memory, check store is coalesced
-// TODO: try keeping C_frags, while doing warp tiling
+// TODO: check reads coalesced, check store is coalesced
 
 template <class accType, class elmType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int warp_tiles_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
 __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
@@ -29,34 +28,6 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
     constexpr int copies_per_thread_A = (shared_m * shared_k + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_B = (shared_k * shared_n + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_C = (shared_m * shared_n + threads_per_block) / threads_per_block;
-
-    //    Pad to avoid bank conflicts
-    constexpr unsigned int A_shared_k_true = shared_k + 8;
-    __shared__ elmType A_shared[shared_m][A_shared_k_true];
-
-    //    Pad to avoid bank conflicts
-    constexpr unsigned int B_shared_n_true = shared_n + 8;
-    __shared__ elmType B_shared[shared_k][B_shared_n_true];
-
-#ifdef CACHE_C
-    //    Pad to avoid bank conflicts
-    constexpr unsigned int C_shared_n_true = shared_n + 8;
-    __shared__ accType C_shared[shared_m][C_shared_n_true];
-#else
-#ifdef KEEP_C
-    wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
-
-    #pragma unroll
-    for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
-    {
-        #pragma unroll
-        for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
-        {
-            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], 0.0f);
-        }
-    }
-#endif
-#endif
 
 //    TODO: try moving these to use?
     unsigned int block_m_global_offset = blockIdx.y * shared_m;
@@ -75,20 +46,46 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
     unsigned int warp_m_global_offset = block_m_global_offset + warp_m_shared_offset;
     unsigned int warp_n_global_offset = block_n_global_offset + warp_n_shared_offset;
 
-#ifdef CACHE_C
-    #pragma unroll
-        for (int i = 0; i < copies_per_thread_C; i++) {
-            unsigned int tile_i = threadIdx.x + i * blockDim.x;
-            unsigned int tile_m_index = tile_i / shared_n;
-            unsigned int tile_n_index = tile_i % shared_n;
-            unsigned int C_m_index = block_m_global_offset + tile_m_index;
-            unsigned int C_n_index = block_n_global_offset + tile_n_index;
+    //    Pad to avoid bank conflicts
+    constexpr unsigned int A_shared_k_true = shared_k + 8;
+    __shared__ elmType A_shared[shared_m][A_shared_k_true];
 
-            if (tile_m_index < shared_m && tile_n_index < shared_n) {
-                //            TODO: try to avoid ternary statement
-                C_shared[tile_m_index][tile_n_index] = C_m_index < m && C_n_index < n ? C[C_m_index * n + C_n_index] : (accType) 0.0f;
-            }
+    //    Pad to avoid bank conflicts
+    constexpr unsigned int B_shared_n_true = shared_n + 8;
+    __shared__ elmType B_shared[shared_k][B_shared_n_true];
+
+#ifdef CACHE_C
+    //    Pad to avoid bank conflicts
+    constexpr unsigned int C_shared_n_true = shared_n + 8;
+    __shared__ accType C_shared[shared_m][C_shared_n_true];
+
+    #pragma unroll
+    for (int i = 0; i < copies_per_thread_C; i++) {
+        unsigned int tile_i = threadIdx.x + i * blockDim.x;
+        unsigned int tile_m_index = tile_i / shared_n;
+        unsigned int tile_n_index = tile_i % shared_n;
+        unsigned int C_m_index = block_m_global_offset + tile_m_index;
+        unsigned int C_n_index = block_n_global_offset + tile_n_index;
+
+        if (tile_m_index < shared_m && tile_n_index < shared_n) {
+            //            TODO: try to avoid ternary statement
+            C_shared[tile_m_index][tile_n_index] = C_m_index < m && C_n_index < n ? C[C_m_index * n + C_n_index] : (accType) 0.0f;
         }
+    }
+#else
+#ifdef KEEP_C
+    wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
+
+    #pragma unroll
+    for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+    {
+        #pragma unroll
+        for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
+        {
+            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], 0.0f);
+        }
+    }
+#endif
 #endif
 
     for (int global_k_offset = 0; global_k_offset < k; global_k_offset += shared_k) {
@@ -218,9 +215,9 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
             #pragma unroll
             for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
             {
-                        int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
-                        int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
-                        wmma::store_matrix_sync(&C[m_index * n + n_index], C_frag[warp_m_offset_i][warp_n_offset_i], n, wmma::mem_row_major);
+                int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
+                int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
+                wmma::store_matrix_sync(&C[m_index * n + n_index], C_frag[warp_m_offset_i][warp_n_offset_i], n, wmma::mem_row_major);
             }
         }
     }
