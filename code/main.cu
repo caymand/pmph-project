@@ -26,7 +26,7 @@ long int benchmark_tiled_tensor_mmm(
     constexpr int block_tiles_m = 2;
     constexpr int block_tiles_n = 2;
 //    TODO: calculate maximum possible block_tiles_k based on shared memory size
-    constexpr int block_tiles_k = 1;
+    constexpr int block_tiles_k = 2;
 
     constexpr int warp_tiles_m = 2;
     constexpr int warp_tiles_n = 2;
@@ -37,16 +37,15 @@ long int benchmark_tiled_tensor_mmm(
     constexpr int wmma_n = 16;
     constexpr int wmma_k = 16;
 
-
     constexpr unsigned int threads_per_block =  block_tiles_m * block_tiles_n * WARP_SIZE;
     printf("Threads used: %d\n", threads_per_block);
     assert(threads_per_block <= 1024);
-
     //    Assumes num_warps >= block_tiles_m * block_tiles_n, i.e. all block tiles are handled by a warp
     assert(threads_per_block / WARP_SIZE >= block_tiles_m * block_tiles_n);
+//    TODO: try more than one tile per warp? would allow increasing sharing without increasing block size
 
-    int dimx = ceil( ((float) n)/(wmma_n * warp_tiles_n * block_tiles_n));
-    int dimy = ceil( ((float) m)/(wmma_m * warp_tiles_m * block_tiles_m));
+    int dimx = ceil(((float) n)/(wmma_n * warp_tiles_n * block_tiles_n));
+    int dimy = ceil(((float) m)/(wmma_m * warp_tiles_m * block_tiles_m));
 
     dim3 grid(dimx, dimy, 1);
     dim3 block(threads_per_block, 1, 1);

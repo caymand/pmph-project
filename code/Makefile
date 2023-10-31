@@ -9,7 +9,7 @@ MAIN = main
 GOLDEN_CPU = golden_cpu.o
 
 # depends on building the main file
-all: $(MAIN) matmul-tensor
+all: $(MAIN)
 
 # depends on headers and source
 $(MAIN): $(CFILES) $(HEADERS)
