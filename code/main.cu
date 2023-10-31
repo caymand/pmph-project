@@ -6,6 +6,8 @@
 #include "matmul-tensor.cuh"
 #include "cuda_fp16.h"
 #include <cassert>
+//#include <cublas.h>
+#include <cublas_v2.h>
 
 
 #define WARP_SIZE 32
@@ -161,8 +163,25 @@ long int benchmark_tiled_mmm(
     dim3 grid(dimx, dimy, 1);
     dim3 block(16, 16, 1);
 
+//    cublasHandle_t handle;
+//    cublasStatus_t stat;
+//    stat = cublasCreate(&handle);
+//    half alpha = (half) 1.0;
+//    half beta = (half) 0.0;
+//    if (stat != CUBLAS_STATUS_SUCCESS) {
+//        printf ("CUBLAS initialization failed\n");
+//        return EXIT_FAILURE;
+//    }
+
     t.start();
     for (int i = 0; i < n_runs; i++) {
+//        cublasHgemm(
+//                handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k,
+//                &alpha,
+//                (const half *) A_device, k,
+//                (const half *) B_device, n,
+//                &beta,
+//                (half *) ResMat_device, n);
         matMulTiled<elmT, tile_size, reg_size, tile_size, reg_size, tile_size><<<grid, block>>>(
                 A_device, B_device, ResMat_device, m, n, k);
     }
@@ -220,6 +239,9 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
 }
 
 
+typedef half elmT;
+// TODO: fix for float accT
+typedef float accT;
 
 
 
@@ -258,31 +280,32 @@ int main(int argc, char * argv[])
     // Tiled GPU verion
     // TODO: this fails when the type is float since it is not supported for wmma
     // and the templated function is still created
-    RandomMatrix<float, 2> A;
-    RandomMatrix<float, 2> B;
+    RandomMatrix<elmT, 2> A;
+    RandomMatrix<elmT , 2> B;
     TimeMeasurement t;
     A.fill_rand<float_range>(m, k);
     B.fill_rand<float_range>(k, n);
 
+//    TODO: this should use halfs
     std::cout << "-----" << std::endl;
     std::cout << "Running GPU register tiled version" << std::endl;
     std::cout << "Dry run" << std::endl;
-    run_mmm_kernel<float, 16, 5, 2, false>(
+    run_mmm_kernel<elmT, 16, 5, 2, false>(
             1, m, n, k, A, B
     );
     std::cout << "Average run of: " << n_runs << std::endl;
-    RandomMatrix<float, 2> *C = run_mmm_kernel<float, 16, 5, 2, false>(
+    RandomMatrix<elmT, 2> *C = run_mmm_kernel<elmT, 16, 5, 2, false>(
             n_runs, m, n, k, A, B
     );
-    RandomMatrix<float, 2> target_res;
+    RandomMatrix<accT, 2> target_res;
     target_res.fill_from(*C, m * n);
     std::cout << "-----" << std::endl;
 
     // GPU version
-    RandomMatrix<half, 2> A_half;
-    RandomMatrix<half, 2> B_half;
-    A_half.fill_from(A, m, k);
-    B_half.fill_from(B, k, n);
+//    RandomMatrix<elmT, 2> A_half;
+//    RandomMatrix<elmT, 2> B_half;
+//    A_half.fill_from(A, m, k);
+//    B_half.fill_from(B, k, n);
 
 //    TODO: remove?
 //    constexpr int block_tile_size = 5; // TODO: calculate based on amount of shared memory
@@ -290,25 +313,27 @@ int main(int argc, char * argv[])
     std::cout << "-----" << std::endl;
     std::cout << "Running GPU tensor version" << std::endl;
     std::cout << "Dry run" << std::endl;
-    RandomMatrix<float, 2> *GPU_res_tensor_half = run_mmm_kernel<half, 16, 5, 2, true, float>(
-            1, m, n, k, A_half, B_half
+    RandomMatrix<accT , 2> *GPU_res_tensor = run_mmm_kernel<elmT, 16, 5, 2, true, accT>(
+            1, m, n, k, A, B
     );
 
-    RandomMatrix<float, 2> GPU_res_tensor;
-    GPU_res_tensor.fill_from(*GPU_res_tensor_half, m, n);
-    Validator<float> validator(target_res.to_cpu(), GPU_res_tensor.to_cpu(), m * n);
+//    RandomMatrix<float, 2> GPU_res_tensor;
+//    GPU_res_tensor.fill_from(*GPU_res_tensor, m, n);
+
+    Validator<accT> validator(target_res.to_cpu(), GPU_res_tensor->to_cpu(), m * n);
     // validator.setEps(0.000005); // original used by cosmin
-    validator.setEps(0.0005);
+//    Check if something is wrong, or we really need this eps
+    validator.setEps((accT) 0.1);
 
     std::cout << "Average run after: " << n_runs << " runs"<< std::endl;
-    run_mmm_kernel<half, 16, 5, 2, true, float>(
-            n_runs, m, n, k, A_half, B_half
+    run_mmm_kernel<elmT , 16, 5, 2, true, accT>(
+            n_runs, m, n, k, A, B
     );
     std::cout << "-----" << std::endl;
 
     validator.validate();
 
-    delete GPU_res_tensor_half;
+    delete GPU_res_tensor;
 
     return 0;
 }

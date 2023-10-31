@@ -37,12 +37,13 @@ class Validator
     private:
         std::vector<T> flatMat1;
         std::vector<T> flatMat2;
-        float eps;
+        T eps;
     public:
         Validator(T *flatMat1, T *flatMat2, int N);
-        void setEps(float);
+        void setEps(T);
         void validate();
 };
+
 
 class TimeMeasurement
 {

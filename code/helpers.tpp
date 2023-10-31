@@ -12,7 +12,7 @@ Validator<T>::Validator(T *flatMat1, T* flatMat2, int N)
     this->eps = 0.0000000001; // e-10
 }
 template <typename T>
-void Validator<T>::setEps(float eps) {
+void Validator<T>::setEps(T eps) {
     this->eps = eps;
 }
 
@@ -24,8 +24,15 @@ void Validator<T>::validate()
     std::transform(
         this->flatMat1.begin(), this->flatMat1.end(), this->flatMat2.begin(), flatMatrixMask.begin(),  
         [this] (T v1, T v2) {
-            float err = (float)std::abs(v1 - v2) / std::max(v1, v2);            
-            return err < this->eps;
+//            float err = (float)std::abs(v1 - v2) / std::max(v1, v2);
+//            return err < this->eps;
+
+//            Calculate err without using abs
+            T err = (v1 - v2) / std::max(v1, v2);
+
+//            printf("v1: %.5f, v2: %.5f, err: %.5f\n", (float) v1, (float) v2, (float) err);
+
+            return err < (T) 0.0 ? -err < this->eps : err < this->eps;
         }
     );    
     auto errorCount = std::count(flatMatrixMask.begin(), flatMatrixMask.end(), errValue);
@@ -39,7 +46,7 @@ void Validator<T>::validate()
     std::cout << "-------" << std::endl;
     std::printf("Found: %d wrong elements\n", errorCount);
     std::cout << "First at flat index: " << firstError << std::endl;
-    std::printf("Expected %.5f, got %.5f\n", this->flatMat1[firstError], this->flatMat2[firstError]);
+    std::printf("Expected %.5f, got %.5f\n", (float) this->flatMat1[firstError], (float) this->flatMat2[firstError]);
 }
 
 // RandomMatrix
