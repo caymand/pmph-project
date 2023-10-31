@@ -64,12 +64,10 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
         unsigned int tile_i = threadIdx.x + i * blockDim.x;
         unsigned int tile_m_index = tile_i / shared_n;
         unsigned int tile_n_index = tile_i % shared_n;
-        unsigned int C_m_index = block_m_global_offset + tile_m_index;
-        unsigned int C_n_index = block_n_global_offset + tile_n_index;
 
         if (tile_m_index < shared_m && tile_n_index < shared_n) {
             //            TODO: try to avoid ternary statement
-            C_shared[tile_m_index][tile_n_index] = C_m_index < m && C_n_index < n ? C[C_m_index * n + C_n_index] : (accType) 0.0f;
+            C_shared[tile_m_index][tile_n_index] = (accType) 0.0f;
         }
     }
 #else
@@ -89,7 +87,7 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
 #endif
 
     for (int global_k_offset = 0; global_k_offset < k; global_k_offset += shared_k) {
-//      Copy data to shared memory
+//      Copy A and B to shared memory
         #pragma unroll
         for (int i = 0; i < copies_per_thread_A; i++) {
             unsigned int tile_i = threadIdx.x + i * blockDim.x;
@@ -122,13 +120,9 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
 //      End of copy to shared memory
 
 //        TODO: move check into loop?
-        if (warp_m_global_offset < m && warp_n_global_offset < n)
-        {
-            // compute the per-thread result css:
-            // the thread result is computed in register memory
-            // and the global-memory array C is updated at the end.
-
+        if (warp_m_global_offset < m && warp_n_global_offset < n) {
 #ifndef KEEP_C
+//  Load C from memory
             wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
 
 //          Assumes C is initialized to zero
@@ -151,6 +145,7 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
             }
 #endif
 
+//          Do Matrix multiplication
 //            #pragma unroll
             for (int local_k_offset = 0; local_k_offset < block_tiles_k * wmma_k; local_k_offset += wmma_k)
             {
@@ -170,6 +165,7 @@ __global__ void matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int
             }
 
 #ifndef KEEP_C
+//  Update C, freeing registers for copying A and B
             #pragma unroll
             for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
             {
