@@ -24,17 +24,67 @@ long int benchmark_tiled_tensor_mmm(
 {
 //    TODO: calculate maximum possible block_tiles_k based on shared memory size? similarly calculate warp_tiles_k based on availible registers
 //    TODO: calculate m and n dimensions based on optimal block size?
+//    constexpr int wmma_m = 16;
+//    constexpr int wmma_n = 16;
+//    constexpr int wmma_k = 16;
+//
+//    constexpr int warp_tiles_m = 1;
+//    constexpr int warp_tiles_n = 1;
+//    constexpr int warp_tiles_k = 1;
+//
+//    constexpr int block_tiles_m = 2;
+//    constexpr int block_tiles_n = 2;
+//    constexpr int block_tiles_k = 2;
+
+// TODO: also set type using compiler options
+// Set constants using compiler options
+#ifdef WMMA_M
+    constexpr int wmma_m = WMMA_M;
+#else
     constexpr int wmma_m = 16;
+#endif
+#ifdef WMMA_N
+    constexpr int wmma_n = WMMA_N;
+#else
     constexpr int wmma_n = 16;
+#endif
+#ifdef WMMA_K
+    constexpr int wmma_k = WMMA_K;
+#else
     constexpr int wmma_k = 16;
-
-    constexpr int warp_tiles_m = 1;
-    constexpr int warp_tiles_n = 1;
-    constexpr int warp_tiles_k = 1;
-
+#endif
+#ifdef WARP_TILES_M
+    constexpr int warp_tiles_m = WARP_TILES_M;
+#else
+    constexpr int warp_tiles_m = 2;
+#endif
+#ifdef WARP_TILES_N
+    constexpr int warp_tiles_n = WARP_TILES_N;
+#else
+    constexpr int warp_tiles_n = 2;
+#endif
+#ifdef WARP_TILES_K
+    constexpr int warp_tiles_k = WARP_TILES_K;
+#else
+    constexpr int warp_tiles_k = 2;
+#endif
+#ifdef BLOCK_TILES_M
+    constexpr int block_tiles_m = BLOCK_TILES_M;
+#else
     constexpr int block_tiles_m = 2;
+#endif
+#ifdef BLOCK_TILES_N
+    constexpr int block_tiles_n = BLOCK_TILES_N;
+#else
     constexpr int block_tiles_n = 2;
+#endif
+#ifdef BLOCK_TILES_K
+    constexpr int block_tiles_k = BLOCK_TILES_K;
+#else
     constexpr int block_tiles_k = 2;
+#endif
+
+
 
     constexpr unsigned int threads_per_block = block_tiles_m * block_tiles_n * WARP_SIZE;
     printf("Threads used: %d\n", threads_per_block);
