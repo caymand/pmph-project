@@ -15,9 +15,15 @@
 
 #define SHARED_PADDING 8
 
+enum mm_kernel {
+    register_tiled,
+    tensor_naive,
+    tensor_optimized
+};
+
 
 template <typename elmT, typename elmAccT = elmT>
-long int benchmark_tiled_tensor_mmm(
+long int benchmark_optimized_tensor_mmm(
         int n_runs,
         elmT *A_device,
         elmT *B_device,
@@ -144,6 +150,54 @@ long int benchmark_tiled_tensor_mmm(
     return t.elapsed();
 }
 
+template <typename elmT, typename elmAccT = elmT>
+unsigned benchmark_naive_tensor_mmm(
+        unsigned n_runs,
+        elmT *A_device,
+        elmT *B_device,
+        elmAccT *ResMat_device,
+        int m,
+        int n,
+        int k)
+{
+    constexpr int block_tiles_m = 8;
+    constexpr int block_tiles_n = 4;
+    constexpr int block_tiles_k = 4; 
+    constexpr int wmma_n = 16;
+    constexpr int wmma_m = 16;
+    constexpr int wmma_k = 16;
+
+
+    // Let block work on block_tiles * wmma elements.
+    // there are n elements on the x direction and we know each thread works on block_tiles_n
+    int dimx = ceil(((float) n)/(wmma_n * block_tiles_n)); 
+    int dimy = ceil( ((float) m)/(wmma_m * block_tiles_m));
+    dim3 grid(dimx, dimy, 1);
+    // dim3 block(threads_per_block, 1, 1); // 1D block of 256 elements
+    /* Okay so what do we want? Each mm will be done by the entire warp and works warp level.
+    So whatever we want to tile for should be multiple of the warp size.
+    Here we say that the block should compute block_tiles_m x block_tiles_n tensor mm.
+
+    This also works for the grid specification, since we tile so that each warp computes
+    a wmma_m x wmma_n result, and we use block_tiles_m x block_tiles_n warps in the block.
+    */
+    dim3 block(block_tiles_n * WARP_SIZE, block_tiles_m, 1);
+
+    TimeMeasurement t;
+
+    t.start();
+    for (int i = 0; i < n_runs; i++) {
+        matMulTiledTensorNaive<
+            elmAccT, elmT, wmma_m, wmma_n, wmma_k, block_tiles_m, block_tiles_n, block_tiles_k>
+            <<<grid, block>>>(A_device, B_device, ResMat_device, m, n, n);
+    }
+    cudaDeviceSynchronize();
+    t.stop();
+    // Check if kernel launch was successfull
+    gpuAssert(cudaPeekAtLastError());
+
+    return t.elapsed();
+}
 
 template <typename elmT, int tile_size, int reg_size>
 long int benchmark_tiled_mmm(
@@ -174,7 +228,7 @@ long int benchmark_tiled_mmm(
 }
 
 // Expects A to have shape K x K and B to have K x N
-template <typename elmT, int tile_size, int reg_size, int MatDim, bool use_tensor_cores, typename elmAccT = elmT>
+template <typename elmT, int tile_size, int reg_size, int MatDim, mm_kernel kernel_type, typename elmAccT = elmT>
 //int reg_size, int n_runs = 1, int MatDim = 2, class accT = elmT>
 RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
         int n_runs,
@@ -192,9 +246,14 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
     auto B_device = B.to_gpu();
 
     auto ResMat_device = ResMat->to_gpu();
-    long int total_elapsed;
-    if constexpr(use_tensor_cores) {
-        total_elapsed = benchmark_tiled_tensor_mmm<elmT, elmAccT>(
+    long int total_elapsed;    
+    if constexpr (kernel_type == mm_kernel::tensor_optimized) {
+        total_elapsed = benchmark_optimized_tensor_mmm<elmT, elmAccT>(
+                n_runs, A_device, B_device, ResMat_device, m, n, k
+        );
+    }
+    else if constexpr (kernel_type == mm_kernel::tensor_naive) {
+        total_elapsed = benchmark_naive_tensor_mmm<elmT, elmAccT>(
                 n_runs, A_device, B_device, ResMat_device, m, n, k
         );
     }
@@ -258,19 +317,19 @@ int main(int argc, char * argv[])
     // TODO: this fails when the type is float since it is not supported for wmma
     // and the templated function is still created
     RandomMatrix<float, 2> A;
-    RandomMatrix<float, 2> B;
-    TimeMeasurement t;
+    RandomMatrix<float, 2> B;    
     A.fill_rand<float_range>(m, k);
     B.fill_rand<float_range>(k, n);
 
     std::cout << "-----" << std::endl;
     std::cout << "Running GPU register tiled version" << std::endl;
     std::cout << "Dry run" << std::endl;
-    run_mmm_kernel<float, 16, 5, 2, false>(
+    
+    run_mmm_kernel<float, 16, 5, 2, mm_kernel::register_tiled>(
             1, m, n, k, A, B
     );
     std::cout << "Average run of: " << n_runs << std::endl;
-    RandomMatrix<float, 2> *C = run_mmm_kernel<float, 16, 5, 2, false>(
+    RandomMatrix<float, 2> *C = run_mmm_kernel<float, 16, 5, 2, mm_kernel::register_tiled>(
             n_runs, m, n, k, A, B
     );
     RandomMatrix<float, 2> target_res;
@@ -283,31 +342,42 @@ int main(int argc, char * argv[])
     A_half.fill_from(A, m, k);
     B_half.fill_from(B, k, n);
 
-//    TODO: remove?
-//    constexpr int block_tile_size = 5; // TODO: calculate based on amount of shared memory
+    std::cout << "-----" << std::endl;
+    std::cout << "Running NAIVE GPU tensor version" << std::endl;
+    std::cout << "Dry run" << std::endl;
+    RandomMatrix<float, 2> *GPU_res_tensor_naive = run_mmm_kernel<half, 16, 5, 2, mm_kernel::tensor_naive, float>(
+            1, m, n, k, A_half, B_half
+    );
+    Validator<float> validator_naive_tiled(target_res.to_cpu(), (*GPU_res_tensor_naive).to_cpu(), m * n);
+    delete GPU_res_tensor_naive;
+    validator_naive_tiled.setEps(0.1);
+    validator_naive_tiled.validate();
+    std::cout << "Average run after: " << n_runs << " runs"<< std::endl;
+    run_mmm_kernel<half, 16, 5, 2, mm_kernel::tensor_naive, float>(
+            n_runs, m, n, k, A_half, B_half
+    );
+    std::cout << "-----" << std::endl;
 
     std::cout << "-----" << std::endl;
-    std::cout << "Running GPU tensor version" << std::endl;
+    std::cout << "Running OPTIMIZED GPU tensor version" << std::endl;
     std::cout << "Dry run" << std::endl;
-    RandomMatrix<float, 2> *GPU_res_tensor_half = run_mmm_kernel<half, 16, 5, 2, true, float>(
+    RandomMatrix<float, 2> *GPU_res_tensor = run_mmm_kernel<half, 16, 5, 2, mm_kernel::tensor_optimized, float>(
             1, m, n, k, A_half, B_half
     );
 
-    RandomMatrix<float, 2> GPU_res_tensor;
-    GPU_res_tensor.fill_from(*GPU_res_tensor_half, m, n);
-    Validator<float> validator(target_res.to_cpu(), GPU_res_tensor.to_cpu(), m * n);
+    Validator<float> validator(target_res.to_cpu(), (*GPU_res_tensor).to_cpu(), m * n);
     // validator.setEps(0.000005); // original used by cosmin
     validator.setEps(0.0005);
 
     std::cout << "Average run after: " << n_runs << " runs"<< std::endl;
-    run_mmm_kernel<half, 16, 5, 2, true, float>(
+    run_mmm_kernel<half, 16, 5, 2, mm_kernel::tensor_optimized, float>(
             n_runs, m, n, k, A_half, B_half
     );
     std::cout << "-----" << std::endl;
 
     validator.validate();
 
-    delete GPU_res_tensor_half;
+    delete GPU_res_tensor;
 
     return 0;
 }
