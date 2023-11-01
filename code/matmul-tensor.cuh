@@ -202,34 +202,22 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 #ifdef UNROLL
                 #pragma unroll
                 #endif
-                for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+                for (int warp_k_offset_i = 0; warp_k_offset_i < warp_tiles_k; warp_k_offset_i++)
                 {
                     #ifdef UNROLL
                     #pragma unroll
                     #endif
-                    for (int warp_k_offset_i = 0; warp_k_offset_i < warp_tiles_k; warp_k_offset_i++)
+                    for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
                     {
                         wmma::load_matrix_sync(A_frag[warp_m_offset_i][warp_k_offset_i], &A_shared[warp_m_shared_offset + warp_m_offset_i * wmma_m][local_k_offset + warp_k_offset_i * wmma_k], A_shared_k_true);
-                    }
 
-                    #ifdef UNROLL
-                    #pragma unroll
-                    #endif
-                    for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
-                    {
                         #ifdef UNROLL
                         #pragma unroll
                         #endif
-                        for (int warp_k_offset_i = 0; warp_k_offset_i < warp_tiles_k; warp_k_offset_i++)
+                        for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
                             wmma::load_matrix_sync(B_frag[warp_k_offset_i][warp_n_offset_i], &B_shared[local_k_offset + warp_k_offset_i * wmma_k][warp_n_shared_offset+ warp_n_offset_i * wmma_n], B_shared_n_true);
-                        }
 
-                        #ifdef UNROLL
-                        #pragma unroll
-                        #endif
-                        for (int warp_k_offset_i = 0; warp_k_offset_i < warp_tiles_k; warp_k_offset_i++)
-                        {
                             wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i], A_frag[warp_m_offset_i][warp_k_offset_i], B_frag[warp_k_offset_i][warp_n_offset_i], C_frag[warp_m_offset_i][warp_n_offset_i]);
                         }
                     }
