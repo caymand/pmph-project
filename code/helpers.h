@@ -16,7 +16,7 @@ class RandomMatrix
         unsigned seed;
         std::vector<T> flatMat;
         std::vector<unsigned> dimensions;        
-        void setDimensions(const unsigned dimensions, ...);
+        void setDimensions(unsigned first_dim, va_list dimensions);
 
     public:                
         RandomMatrix();        
@@ -26,7 +26,6 @@ class RandomMatrix
         RandomMatrix<T, N>& setSeed(unsigned s);        
         template <int RANDMAX> void fill_rand(const unsigned dimensions, ...);
         template <typename U> void fill_from(RandomMatrix<U, N> &other, const unsigned dimensions, ...);
-
         void fill(T value, const unsigned int dimensions, ...);
 };
 

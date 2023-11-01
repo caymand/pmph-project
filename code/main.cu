@@ -186,7 +186,6 @@ RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
 {
     double total_ops = 2.0f * n * k * m;
     auto ResMat = new RandomMatrix<elmAccT, MatDim>;
-    // This took me like 2 hours to fix...
     ResMat->fill(0, m, n);
 
     auto A_device = A.to_gpu();
