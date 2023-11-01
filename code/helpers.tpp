@@ -57,22 +57,24 @@ unsigned RandomMatrix<T, N>::flatSize()
 {
     unsigned acc = 1;
 
-    for (auto dim : this->dimensions) {
+    for (int dim : this->dimensions) {
         acc *= dim;
     }
+
     return acc;
 }
 template <typename T, int N>
 void RandomMatrix<T, N>::setDimensions(unsigned first_dim, va_list dimensions) 
 {
-    // va_list dims; va_start(dims, dimensions);                
+    this->dimensions.clear();
     this->dimensions.push_back(first_dim);                        
     for (int i = 0; i < N - 1; i++) 
     {
-        unsigned dim = va_arg(dimensions, unsigned);        
+        unsigned dim = va_arg(dimensions, unsigned);
         this->dimensions.push_back(dim);                
-    }      
+    }
 }
+
 template <typename T, int N>
 RandomMatrix<T, N>::RandomMatrix()
 {
@@ -86,7 +88,8 @@ void RandomMatrix<T, N>::fill_from(RandomMatrix<U, N> &other, const unsigned fir
     va_list remaining_dims; va_start(remaining_dims, first_dim);      
     this->setDimensions(first_dim, remaining_dims);            
     U *other_flat_mat = other.to_cpu();
-    for (int i = 0; i < other.flatSize(); i++) {
+    int size = other.flatSize();
+    for (int i = 0; i < size; i++) {
         U v = other_flat_mat[i];
         this->flatMat.push_back((T) v);
     }
@@ -101,13 +104,15 @@ T* RandomMatrix<T, N>::to_cpu()
 template <typename T, int N>
 T* RandomMatrix<T, N>::to_gpu() 
 {
-
-    void *gpu_mem;
     size_t n_bytes = this->flatSize() * sizeof(T);
-    if (!gpuAssert(cudaMalloc(&gpu_mem, n_bytes))) 
-    {
-        std::cout << "GPU memory allocation error" << std::endl;     
+
+    if (this->gpu_mem == nullptr) {
+        if (!gpuAssert(cudaMalloc(&gpu_mem, n_bytes)))
+        {
+            std::cout << "GPU memory allocation error" << std::endl;
+        }
     }
+
     gpuAssert(cudaMemcpy(gpu_mem, this->to_cpu(), n_bytes, cudaMemcpyHostToDevice));
     return (T *) gpu_mem;
 }
@@ -122,7 +127,8 @@ template <typename T, int N>
 template <int RANDMAX> 
 void RandomMatrix<T, N>::fill_rand(const unsigned first_dim, ...)
 {              
-    va_list remaining_dims; va_start(remaining_dims, first_dim);      
+    va_list remaining_dims;
+    va_start(remaining_dims, first_dim);
     this->setDimensions(first_dim, remaining_dims);
     this->flatMat.resize(this->flatSize());
     std::cout << "Capacity: " << this->flatSize()  << std::endl;
@@ -132,13 +138,14 @@ void RandomMatrix<T, N>::fill_rand(const unsigned first_dim, ...)
 }
 
 template <typename T, int N>
-void RandomMatrix<T, N>::fill(T value, const unsigned first_dim, ...)
+void RandomMatrix<T, N>::fill_zeros(const unsigned first_dim, ...)
 {
-    va_list remaining_dims; va_start(remaining_dims, first_dim);      
+    va_list remaining_dims;
+    va_start(remaining_dims, first_dim);
     this->setDimensions(first_dim, remaining_dims);
     std::cout << "Capacity: " << this->flatSize()  << std::endl;
     this->flatMat.resize(this->flatSize());
-    std::fill(this->flatMat.begin(), this->flatMat.end(), 0);
+    std::fill(this->flatMat.begin(), this->flatMat.end(), (T) 0);
 }
 
 // TimeMeasurment
