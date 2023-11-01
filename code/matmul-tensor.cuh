@@ -38,7 +38,7 @@ using namespace nvcuda;
 
 // TODO: set maxBlocksPerCluster?
 
-template <class accType, class elmType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int warp_tiles_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
+template <class elmType, class accType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int warp_tiles_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
 __global__ void
 #ifdef BLOCKS_PER_SM
 __launch_bounds__(THREADS_PER_BLOCK, BLOCKS_PER_SM)
@@ -192,6 +192,9 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             #ifdef UNROLL
             #pragma unroll
             #endif
+            #ifdef NOUNROLL
+            #pragma unroll 1
+            #endif
             for (int local_k_offset_i = 0; local_k_offset_i < block_tiles_k; local_k_offset_i++)
             {
                 int local_k_offset = local_k_offset_i * wmma_k * warp_tiles_k;
@@ -216,7 +219,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         #endif
                         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
-//                            Serpentine iteration to increase locality and reduce register usage
+//                            Serpentine iteration to increase temporal locality and reduce register usage
                             warp_n_offset_i = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 - warp_n_offset_i) : warp_n_offset_i;
 
                             wmma::load_matrix_sync(B_frag[warp_k_offset_i][warp_n_offset_i], &B_shared[local_k_offset + warp_k_offset_i * wmma_k][warp_n_shared_offset+ warp_n_offset_i * wmma_n], B_shared_n_true);

@@ -23,7 +23,7 @@ long int benchmark_tiled_tensor_mmm(
         int n_runs,
         elmT *A_device,
         elmT *B_device,
-        elmAccT *ResMat_device,
+        elmAccT *C_device,
         int m,
         int n,
         int k)
@@ -105,6 +105,8 @@ long int benchmark_tiled_tensor_mmm(
     dim3 grid(dimx, dimy, 1);
     dim3 block(threads_per_block, 1, 1);
 
+    printf("Blocks used: %d x %d = %d\n", dimx, dimy, dimx * dimy);
+
     //  TODO: calculate register usage?
     printf("Available registers per thread: %d (%d per block)\n", MAX_REGISTERS_PER_BLOCK / threads_per_block, MAX_REGISTERS_PER_BLOCK);
 
@@ -127,15 +129,15 @@ long int benchmark_tiled_tensor_mmm(
 #else
     constexpr unsigned int shared_memory_used = shared_memory_used_AB;
 #endif
-    printf("Shared memory used: %d/%d bytes (%.0f%)\n", shared_memory_used, SHARED_MEM_SIZE, (float) shared_memory_used / SHARED_MEM_SIZE * 100);
+    printf("Shared memory used: %d/%d bytes (%.0f%%)\n", shared_memory_used, SHARED_MEM_SIZE, (float) shared_memory_used / SHARED_MEM_SIZE * 100);
 
 
     TimeMeasurement t;
 
     t.start();
     for (int i = 0; i < n_runs; i++) {
-        matMulTiledTensor<elmAccT, elmT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, warp_tiles_k, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block><<<grid, block>>>(
-                A_device, B_device, ResMat_device, m, n, k
+        matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, warp_tiles_k, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block><<<grid, block>>>(
+                A_device, B_device, C_device, m, n, k
         );
     }
     cudaDeviceSynchronize();
@@ -147,16 +149,19 @@ long int benchmark_tiled_tensor_mmm(
 }
 
 
-template <typename elmT, int tile_size, int reg_size>
+template <typename elmT, typename elmAccT>
 long int benchmark_tiled_mmm(
         int n_runs,
         elmT *A_device,
         elmT *B_device,
-        elmT *ResMat_device,
+        elmAccT *C_device,
         int m,
         int n,
         int k)
 {
+    constexpr int tile_size = 16;
+    constexpr int reg_size = 5;
+
     int dimy = ceil( ((float) n)/(tile_size * reg_size));
     int dimx = ceil( ((float) m)/(tile_size * reg_size));
     TimeMeasurement t;
@@ -181,9 +186,9 @@ long int benchmark_tiled_mmm(
 //                (const half *) A_device, k,
 //                (const half *) B_device, n,
 //                &beta,
-//                (half *) ResMat_device, n);
-        matMulTiled<elmT, tile_size, reg_size, tile_size, reg_size, tile_size><<<grid, block>>>(
-                A_device, B_device, ResMat_device, m, n, k);
+//                (half *) C_device, n);
+        matMulTiled<elmT, elmAccT, tile_size, reg_size, tile_size, reg_size, tile_size><<<grid, block>>>(
+                A_device, B_device, C_device, m, n, k);
     }
     cudaDeviceSynchronize();
     t.stop();
@@ -193,55 +198,60 @@ long int benchmark_tiled_mmm(
 }
 
 // Expects A to have shape K x K and B to have K x N
-template <typename elmT, int tile_size, int reg_size, int MatDim, bool use_tensor_cores, typename elmAccT = elmT>
+template <typename elmT, typename elmAccT, int MatDim, bool use_tensor_cores>
 //int reg_size, int n_runs = 1, int MatDim = 2, class accT = elmT>
-RandomMatrix<elmAccT, MatDim>* run_mmm_kernel(
+void run_mmm_kernel(
         int n_runs,
         int m,
         int n,
         int k,
         RandomMatrix<elmT, MatDim> &A,
-        RandomMatrix<elmT, MatDim> &B)
+        RandomMatrix<elmT, MatDim> &B,
+        RandomMatrix<elmAccT, MatDim> &C)
 {
     double total_ops = 2.0f * n * k * m;
-    auto ResMat = new RandomMatrix<elmAccT, MatDim>;
-    ResMat->fill(0, m, n);
 
     auto A_device = A.to_gpu();
     auto B_device = B.to_gpu();
 
-    auto ResMat_device = ResMat->to_gpu();
+    auto C_device = C.to_gpu();
     long int total_elapsed;
     if constexpr(use_tensor_cores) {
         total_elapsed = benchmark_tiled_tensor_mmm<elmT, elmAccT>(
-                n_runs, A_device, B_device, ResMat_device, m, n, k
+                n_runs, A_device, B_device, C_device, m, n, k
         );
     }
     else {
-        total_elapsed = benchmark_tiled_mmm<elmT, tile_size, reg_size>(
-                n_runs, A_device, B_device, ResMat_device, m, n, k
+        total_elapsed = benchmark_tiled_mmm<elmT, elmAccT>(
+                n_runs, A_device, B_device, C_device, m, n, k
         );
     }
 
-    cudaMemcpy(ResMat->to_cpu(), ResMat_device, ResMat->flatSize() * sizeof(elmAccT), cudaMemcpyDeviceToHost);
-    cudaFree(A_device); cudaFree(B_device); cudaFree(ResMat_device);
+    cudaMemcpy(C.to_cpu(), C_device, C.flatSize() * sizeof(elmAccT), cudaMemcpyDeviceToHost);
+    cudaFree(A_device); cudaFree(B_device); cudaFree(C_device);
     gpuAssert(cudaPeekAtLastError());
 
 
     if (!total_elapsed) {
         printf("Kernel launch failed\n");
-        memset(ResMat->to_cpu(), 0, m * n);
+        memset(C.to_cpu(), 0, m * n);
     } else {
         printGFlops(total_elapsed, total_ops * n_runs);
     }
-    return ResMat;
 }
 
 
+#ifdef ELM_T
+typedef ELM_T elmT;
+#else
 typedef half elmT;
-// TODO: fix for float accT
-typedef float accT;
+#endif
 
+#ifdef ACC_T
+typedef ACC_T accT;
+#else
+typedef float accT;
+#endif
 
 
 int main(int argc, char * argv[])
@@ -276,63 +286,76 @@ int main(int argc, char * argv[])
         k = atoi(argv[4]);
     }
 
-    // Tiled GPU verion
-    // TODO: this fails when the type is float since it is not supported for wmma
-    // and the templated function is still created
-    RandomMatrix<elmT, 2> A;
-    RandomMatrix<elmT , 2> B;
+
     TimeMeasurement t;
+
+    //  Define matrices
+    RandomMatrix<elmT, 2> A;
+    RandomMatrix<elmT, 2> B;
+    RandomMatrix<accT, 2> A_accT;
+    RandomMatrix<accT, 2> B_accT;
+    RandomMatrix<accT, 2> C;
+    RandomMatrix<accT, 2> C_target;
+    RandomMatrix<accT, 2> C_actual;
+
+    //  Initialize matrices
     A.fill_rand<float_range>(m, k);
     B.fill_rand<float_range>(k, n);
+    C.fill(0, m, n);
+    C_target.fill(0, m, n);
+    A_accT.fill_from(A, m, k);
+    B_accT.fill_from(B, k, n);
 
-//    TODO: this should use halfs
+    // Tiled GPU verion
     std::cout << "-----" << std::endl;
     std::cout << "Running GPU register tiled version" << std::endl;
     std::cout << "Dry run" << std::endl;
-    run_mmm_kernel<elmT, 16, 5, 2, false>(
-            1, m, n, k, A, B
+    run_mmm_kernel<accT, accT, 2, false>(
+            1, m, n, k, A_accT, B_accT, C_target
     );
     std::cout << "Average run of: " << n_runs << std::endl;
-    RandomMatrix<elmT, 2> *C = run_mmm_kernel<elmT, 16, 5, 2, false>(
-            n_runs, m, n, k, A, B
+    run_mmm_kernel<accT , accT, 2, false>(
+            n_runs, m, n, k, A_accT, B_accT, C_target
     );
-    RandomMatrix<accT, 2> target_res;
-    target_res.fill_from(*C, m * n);
+
     std::cout << "-----" << std::endl;
 
     // GPU version
-//    RandomMatrix<elmT, 2> A_half;
-//    RandomMatrix<elmT, 2> B_half;
-//    A_half.fill_from(A, m, k);
-//    B_half.fill_from(B, k, n);
-
-//    TODO: remove?
-//    constexpr int block_tile_size = 5; // TODO: calculate based on amount of shared memory
-
     std::cout << "-----" << std::endl;
     std::cout << "Running GPU tensor version" << std::endl;
     std::cout << "Dry run" << std::endl;
-    RandomMatrix<accT , 2> *GPU_res_tensor = run_mmm_kernel<elmT, 16, 5, 2, true, accT>(
-            1, m, n, k, A, B
+    run_mmm_kernel<elmT, accT, 2, true>(
+            1, m, n, k, A, B, C
     );
 
-//    RandomMatrix<float, 2> GPU_res_tensor;
-//    GPU_res_tensor.fill_from(*GPU_res_tensor, m, n);
-
-    Validator<accT> validator(target_res.to_cpu(), GPU_res_tensor->to_cpu(), m * n);
-    // validator.setEps(0.000005); // original used by cosmin
-//    Check if something is wrong, or we really need this eps
-    validator.setEps((accT) 0.1);
+    C_actual.fill_from(C, m, n);
 
     std::cout << "Average run after: " << n_runs << " runs"<< std::endl;
-    run_mmm_kernel<elmT , 16, 5, 2, true, accT>(
-            n_runs, m, n, k, A, B
+    run_mmm_kernel<elmT, accT, 2, true>(
+            n_runs, m, n, k, A, B, C
     );
     std::cout << "-----" << std::endl;
 
+    Validator<accT> validator(C_target.to_cpu(), C_actual.to_cpu(), m * n);
+//    validator.setEps(0.000005); // original used by cosmin
+    validator.setEps(0.0005);
+//    Check if something is wrong, or we really need this eps
+//    validator.setEps((accT) 0.1);
+
     validator.validate();
 
-    delete GPU_res_tensor;
+    cudaFree(A.to_gpu());
+    cudaFree(B.to_gpu());
+    cudaFree(C.to_gpu());
+    cudaFree(C_target.to_gpu());
+    cudaFree(C_actual.to_gpu());
+    cudaFree(A_accT.to_gpu());
+    cudaFree(B_accT.to_gpu());
 
     return 0;
 }
+
+// TODO: try half-half, half-float, (double-double, tf32-tf32)
+// Find best parameters for tiled and tensor for each case
+// TODO: graphs
+
