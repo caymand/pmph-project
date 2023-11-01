@@ -216,6 +216,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         #endif
                         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
+//                            Serpentine iteration to increase locality and reduce register usage
                             warp_n_offset_i = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 - warp_n_offset_i) : warp_n_offset_i;
 
                             wmma::load_matrix_sync(B_frag[warp_k_offset_i][warp_n_offset_i], &B_shared[local_k_offset + warp_k_offset_i * wmma_k][warp_n_shared_offset+ warp_n_offset_i * wmma_n], B_shared_n_true);
