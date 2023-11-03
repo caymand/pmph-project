@@ -155,6 +155,7 @@ long int benchmark_optimized_tensor_mmm(
     return t.elapsed();
 }
 
+
 template <typename elmT, typename elmAccT = elmT>
 unsigned benchmark_naive_tensor_mmm(
         unsigned n_runs,
@@ -204,6 +205,7 @@ unsigned benchmark_naive_tensor_mmm(
     return t.elapsed();
 }
 
+
 template <typename elmT, typename elmAccT>
 long int benchmark_tiled_mmm(
         int n_runs,
@@ -223,25 +225,8 @@ long int benchmark_tiled_mmm(
     dim3 grid(dimx, dimy, 1);
     dim3 block(16, 16, 1);
 
-//    cublasHandle_t handle;
-//    cublasStatus_t stat;
-//    stat = cublasCreate(&handle);
-//    half alpha = (half) 1.0;
-//    half beta = (half) 0.0;
-//    if (stat != CUBLAS_STATUS_SUCCESS) {
-//        printf ("CUBLAS initialization failed\n");
-//        return EXIT_FAILURE;
-//    }
-
     t.start();
     for (int i = 0; i < n_runs; i++) {
-//        cublasHgemm(
-//                handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k,
-//                &alpha,
-//                (const half *) A_device, k,
-//                (const half *) B_device, n,
-//                &beta,
-//                (half *) C_device, n);
         matMulTiled<elmT, elmAccT, tile_size, reg_size, tile_size, reg_size, tile_size><<<grid, block>>>(
                 A_device, B_device, C_device, m, n, k);
     }
@@ -251,6 +236,97 @@ long int benchmark_tiled_mmm(
     gpuAssert(cudaPeekAtLastError());
     return t.elapsed();
 }
+
+
+template <typename elmT, typename elmAccT>
+cublasStatus_t cublas_wrapper(
+        cublasHandle_t handle,
+        cublasOperation_t transa, cublasOperation_t transb,
+        int m, int n, int k,
+        const elmAccT *alpha,
+        const elmT *A, int lda,
+        const elmT *B, int ldb,
+        const elmAccT *beta,
+        elmAccT *C, int ldc
+);
+
+template <>
+cublasStatus_t cublas_wrapper<half, half>(
+        cublasHandle_t handle,
+        cublasOperation_t transa, cublasOperation_t transb,
+        int m, int n, int k,
+        const half *alpha,
+        const half *A, int lda,
+        const half *B, int ldb,
+        const half *beta,
+        half *C, int ldc
+) {
+    return cublasGemmEx(
+            handle,
+            transa, transb,
+            m, n, k,
+            alpha,
+            A, CUDA_R_16F, lda,
+            B, CUDA_R_16F, ldb,
+            beta,
+            C, CUDA_R_16F, ldc,
+            CUDA_R_16F,
+            CUBLAS_GEMM_DEFAULT_TENSOR_OP
+    );
+}
+
+template <>
+cublasStatus_t cublas_wrapper<float, float>(
+        cublasHandle_t handle,
+        cublasOperation_t transa, cublasOperation_t transb,
+        int m, int n, int k,
+        const float *alpha,
+        const float *A, int lda,
+        const float *B, int ldb,
+        const float *beta,
+        float *C, int ldc
+) {
+    return cublasGemmEx(
+            handle,
+            transa, transb,
+            m, n, k,
+            alpha,
+            A, CUDA_R_32F, lda,
+            B, CUDA_R_32F, ldb,
+            beta,
+            C, CUDA_R_32F, ldc,
+            CUDA_R_32F,
+            CUBLAS_GEMM_DEFAULT_TENSOR_OP
+    );
+}
+
+
+template <>
+cublasStatus_t cublas_wrapper<half, float>(
+        cublasHandle_t handle,
+        cublasOperation_t transa, cublasOperation_t transb,
+        int m, int n, int k,
+        const float *alpha,
+        const half *A, int lda,
+        const half *B, int ldb,
+        const float *beta,
+        float *C, int ldc
+) {
+    return cublasGemmEx(
+            handle,
+            transa, transb,
+            m, n, k,
+            alpha,
+            A, CUDA_R_16F, lda,
+            B, CUDA_R_16F, ldb,
+            beta,
+            C, CUDA_R_32F, ldc,
+            CUDA_R_32F,
+            CUBLAS_GEMM_DEFAULT_TENSOR_OP
+    );
+}
+
+// TODO: add doubles?
 
 
 template <typename elmT, typename elmAccT>
@@ -268,8 +344,8 @@ long int benchmark_cublas(
     cublasHandle_t handle;
     cublasStatus_t stat;
     stat = cublasCreate(&handle);
-    half alpha = (half) 1.0;
-    half beta = (half) 0.0;
+    elmAccT alpha = (elmAccT) 1.0;
+    elmAccT beta = (elmAccT) 0.0;
     if (stat != CUBLAS_STATUS_SUCCESS) {
         printf ("CUBLAS initialization failed\n");
         return EXIT_FAILURE;
@@ -277,16 +353,26 @@ long int benchmark_cublas(
 
     t.start();
     for (int i = 0; i < n_runs; i++) {
-        cublasHgemm(
-                handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k,
-                &alpha,
-                (const half *) A_device, k,
-                (const half *) B_device, n,
-                &beta,
-                (half *) C_device, n);
+        stat = cublas_wrapper<elmT, elmAccT>(
+            handle, CUBLAS_OP_N, CUBLAS_OP_N, n, m, k,
+            &alpha,
+//                Cublas uses column major, so we need to swap A and B, since B^T @ A^T = (A @ B)^T = C^T
+            B_device, n,
+            A_device, k,
+            &beta,
+            C_device, n
+        );
     }
     cudaDeviceSynchronize();
     t.stop();
+
+    if (stat != CUBLAS_STATUS_SUCCESS) {
+        printf ("CUBLAS error\n");
+        printf("%s\n", cublasGetStatusName(stat));
+        printf("%s\n", cublasGetStatusString(stat));
+        exit(1);
+    }
+
     // Check if kernel launch was successfull
     gpuAssert(cudaPeekAtLastError());
     return t.elapsed();
@@ -468,8 +554,9 @@ int main(int argc, char * argv[])
         n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor optimized")
     );
 
-    benchmark_kernel<acc_type, acc_type, 2, mm_kernel::cublas, true>(
-            n_runs, m, n, k, A_accT, B_accT, C, C_target, std::string("cublas")
+    benchmark_kernel<element_type, acc_type, 2, mm_kernel::cublas, true>(
+//            n_runs, m, n, k, A_accT, B_accT, C, C_target, std::string("cublas")
+            n_runs, m, n, k, A, B, C, C_target, std::string("cublas")
     );
 
     cudaFree(A.to_gpu());
