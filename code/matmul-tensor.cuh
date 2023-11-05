@@ -61,6 +61,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     unsigned int warpID = threadIdx.x / warpSize;
 //    unsigned int laneID = threadIdx.x % warpSize;
 
+    unsigned int warp_group = warpID % 2;
+
 //    Assumes num_warps >= block_tiles_m * block_tiles_n
     unsigned int warp_m_index = warpID / block_tiles_n;
     unsigned int warp_n_index = warpID % block_tiles_n;
@@ -115,7 +117,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         #endif
         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
         {
-            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], 0.0);
+            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], (accType) 0.0f);
         }
     }
 #endif
@@ -127,166 +129,178 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     for (int global_k_offset_i = 0; global_k_offset_i < k_iterations + 1; global_k_offset_i++) {
         int global_k_offset = global_k_offset_i * shared_k;
 
-//        TODO: duplicate code instead of if?
-        if (global_k_offset_i != k_iterations)
+#ifdef UNROLL
+#pragma unroll
+#endif
+        for (int group_round = 0; group_round < 2; group_round++)
         {
-            //      Copy A and B to shared memory
+            if (group_round % 2 == warp_group && global_k_offset_i != k_iterations)
+            {
+                //      Copy A and B to shared memory
 #ifdef UNROLL
 #pragma unroll
 #endif
-            for (int i = 0; i < copies_per_thread_A; i++)
-            {
-                unsigned int tile_i = threadIdx.x + i * blockDim.x;
-                unsigned int tile_m_index = tile_i / shared_k;
-                unsigned int tile_k_index = tile_i % shared_k;
-                unsigned int A_m_index = block_m_global_offset + tile_m_index;
-                unsigned int A_k_index = global_k_offset + tile_k_index;
-
-                //            TODO: try to avoid ternary statement
-                if (tile_m_index < shared_m && tile_k_index < shared_k)
+                for (int i = 0; i < copies_per_thread_A; i++)
                 {
-                    A_shared[global_k_offset_i % 2][tile_m_index][tile_k_index] =
-                            A_m_index < m && A_k_index < k ? A[A_m_index * k + A_k_index] : (elmType) 0.0;
-                }
-            }
+                    unsigned int tile_i = threadIdx.x + i * blockDim.x;
+                    unsigned int tile_m_index = tile_i / shared_k;
+                    unsigned int tile_k_index = tile_i % shared_k;
+                    unsigned int A_m_index = block_m_global_offset + tile_m_index;
+                    unsigned int A_k_index = global_k_offset + tile_k_index;
 
-#ifdef UNROLL
-#pragma unroll
-#endif
-            for (int i = 0; i < copies_per_thread_B; i++)
-            {
-                unsigned int tile_i = threadIdx.x + i * blockDim.x;
-                unsigned int tile_k_index = tile_i / shared_n;
-                unsigned int tile_n_index = tile_i % shared_n;
-                unsigned int B_k_index = global_k_offset + tile_k_index;
-                unsigned int B_n_index = block_n_global_offset + tile_n_index;
-
-                if (tile_k_index < shared_k && tile_n_index < shared_n)
-                {
                     //            TODO: try to avoid ternary statement
-                    B_shared[global_k_offset_i % 2][tile_k_index][tile_n_index] =
-                            B_k_index < k && B_n_index < n ? B[B_k_index * n + B_n_index] : (elmType) 0.0;
-                }
-            }
-        }
-
-//        TODO: not needed anymore?
-//        __syncthreads();
-//      End of copy to shared memory
-
-        if (global_k_offset_i != 0) {
-//        TODO: move check into loop?
-            if (warp_m_global_offset < m && warp_n_global_offset < n)
-            {
-    #ifndef KEEP_C
-                //  Load C from memory
-                            wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
-
-                //          Assumes C is initialized to zero
-    #ifdef UNROLL
-    #pragma unroll
-    #endif
-                            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
-                            {
-    #ifdef UNROLL
-    #pragma unroll
-    #endif
-                                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
-                                {
-    #ifdef CACHE_C
-                                    int m_index = warp_m_shared_offset + warp_m_offset_i * wmma_m;
-                                    int n_index = warp_n_shared_offset + warp_n_offset_i * wmma_n;
-                                    wmma::load_matrix_sync(C_frag[warp_m_offset_i][warp_n_offset_i], &C_shared[m_index][n_index], C_shared_n_true, wmma::mem_row_major);
-    #else
-                                    int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
-                                    int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
-                                    wmma::load_matrix_sync(C_frag[warp_m_offset_i][warp_n_offset_i], &C[m_index * n + n_index], n, wmma::mem_row_major);
-    #endif
-                                }
-                            }
-    #endif
-
-    //          Do Matrix multiplication
-    #ifdef UNROLL
-    #pragma unroll
-    #endif
-    #ifdef NOUNROLL
-    #pragma unroll 1
-    #endif
-                for (int local_k_offset_i = 0; local_k_offset_i < block_tiles_k; local_k_offset_i++)
-                {
-                    int local_k_offset = local_k_offset_i * wmma_k * warp_tiles_k;
-
-    //                TODO: why not copy to shared here?
-
-                    wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[warp_tiles_m];
-                    wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[warp_tiles_n];
-
-    #ifdef UNROLL
-    #pragma unroll
-    #endif
-    #ifdef NOUNROLL
-    #pragma unroll 1
-    #endif
-                    for (int warp_k_offset_i = 0; warp_k_offset_i < warp_tiles_k; warp_k_offset_i++)
+                    if (tile_m_index < shared_m && tile_k_index < shared_k)
                     {
-    #ifdef UNROLL
-    #pragma unroll
-    #endif
-                        for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
-                        {
-                            wmma::load_matrix_sync(A_frag[warp_m_offset_i],
-                                                   &A_shared[(global_k_offset_i - 1) % 2][warp_m_shared_offset + warp_m_offset_i * wmma_m][
-                                                           local_k_offset + warp_k_offset_i * wmma_k], A_shared_k_true);
+                        A_shared[global_k_offset_i % 2][tile_m_index][tile_k_index] =
+                                A_m_index < m && A_k_index < k ? A[A_m_index * k + A_k_index] : (elmType) 0.0f;
+                    }
+                }
 
-    #ifdef UNROLL
-    #pragma unroll
-    #endif
-                            for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
-                            {
-    //                            Serpentine iteration to increase temporal locality and reduce register usage
-                                int warp_n_offset_i_serpentine = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 -
-                                                                                          warp_n_offset_i)
-                                                                                       : warp_n_offset_i;
+#ifdef UNROLL
+#pragma unroll
+#endif
+                for (int i = 0; i < copies_per_thread_B; i++)
+                {
+                    unsigned int tile_i = threadIdx.x + i * blockDim.x;
+                    unsigned int tile_k_index = tile_i / shared_n;
+                    unsigned int tile_n_index = tile_i % shared_n;
+                    unsigned int B_k_index = global_k_offset + tile_k_index;
+                    unsigned int B_n_index = block_n_global_offset + tile_n_index;
 
-                                wmma::load_matrix_sync(B_frag[warp_n_offset_i_serpentine],
-                                                       &B_shared[(global_k_offset_i - 1) % 2][local_k_offset + warp_k_offset_i * wmma_k][
-                                                               warp_n_shared_offset + warp_n_offset_i_serpentine * wmma_n],
-                                                       B_shared_n_true);
-
-                                wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i_serpentine], A_frag[warp_m_offset_i],
-                                               B_frag[warp_n_offset_i_serpentine],
-                                               C_frag[warp_m_offset_i][warp_n_offset_i_serpentine]);
-                            }
-                        }
+                    if (tile_k_index < shared_k && tile_n_index < shared_n)
+                    {
+                        //            TODO: try to avoid ternary statement
+                        B_shared[global_k_offset_i % 2][tile_k_index][tile_n_index] =
+                                B_k_index < k && B_n_index < n ? B[B_k_index * n + B_n_index] : (elmType) 0.0f;
                     }
                 }
             }
 
-#ifndef KEEP_C
-//  Update C, freeing registers for copying A and B
-            #ifdef UNROLL
-            #pragma unroll
-            #endif
-            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+            //        TODO: not needed anymore?
+            //        __syncthreads();
+            //      End of copy to shared memory
+
+            else if (global_k_offset_i != 0)
             {
-                #ifdef UNROLL
-                #pragma unroll
-                #endif
-                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
+                //        TODO: move check into loop?
+                if (warp_m_global_offset < m && warp_n_global_offset < n)
                 {
+#ifndef KEEP_C
+                    //  Load C from memory
+                                wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
+
+                    //          Assumes C is initialized to zero
+#ifdef UNROLL
+#pragma unroll
+#endif
+                                for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+                                {
+#ifdef UNROLL
+#pragma unroll
+#endif
+                                    for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
+                                    {
 #ifdef CACHE_C
-                    int m_index = warp_m_shared_offset + warp_m_offset_i * wmma_m;
-                    int n_index = warp_n_shared_offset + warp_n_offset_i * wmma_n;
-                    wmma::store_matrix_sync(&C_shared[m_index][n_index], C_frag[warp_m_offset_i][warp_n_offset_i], C_shared_n_true, wmma::mem_row_major);
+                                        int m_index = warp_m_shared_offset + warp_m_offset_i * wmma_m;
+                                        int n_index = warp_n_shared_offset + warp_n_offset_i * wmma_n;
+                                        wmma::load_matrix_sync(C_frag[warp_m_offset_i][warp_n_offset_i], &C_shared[m_index][n_index], C_shared_n_true, wmma::mem_row_major);
 #else
-                    int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
-                    int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
-                    wmma::store_matrix_sync(&C[m_index * n + n_index], C_frag[warp_m_offset_i][warp_n_offset_i], n, wmma::mem_row_major);
+                                        int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
+                                        int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
+                                        wmma::load_matrix_sync(C_frag[warp_m_offset_i][warp_n_offset_i], &C[m_index * n + n_index], n, wmma::mem_row_major);
 #endif
+                                    }
+                                }
+#endif
+
+                    //          Do Matrix multiplication
+#ifdef UNROLL
+#pragma unroll
+#endif
+#ifdef NOUNROLL
+#pragma unroll 1
+#endif
+                    for (int local_k_offset_i = 0; local_k_offset_i < block_tiles_k; local_k_offset_i++)
+                    {
+                        int local_k_offset = local_k_offset_i * wmma_k * warp_tiles_k;
+
+                        //                TODO: why not copy to shared here?
+
+                        wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[warp_tiles_m];
+                        wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[warp_tiles_n];
+
+#ifdef UNROLL
+#pragma unroll
+#endif
+#ifdef NOUNROLL
+#pragma unroll 1
+#endif
+                        for (int warp_k_offset_i = 0; warp_k_offset_i < warp_tiles_k; warp_k_offset_i++)
+                        {
+#ifdef UNROLL
+#pragma unroll
+#endif
+                            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+                            {
+                                wmma::load_matrix_sync(A_frag[warp_m_offset_i],
+                                                       &A_shared[(global_k_offset_i - 1) % 2][warp_m_shared_offset +
+                                                                                              warp_m_offset_i * wmma_m][
+                                                               local_k_offset + warp_k_offset_i * wmma_k],
+                                                       A_shared_k_true);
+
+#ifdef UNROLL
+#pragma unroll
+#endif
+                                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
+                                {
+                                    //                            Serpentine iteration to increase temporal locality and reduce register usage
+                                    int warp_n_offset_i_serpentine = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 -
+                                                                                              warp_n_offset_i)
+                                                                                           : warp_n_offset_i;
+
+                                    wmma::load_matrix_sync(B_frag[warp_n_offset_i_serpentine],
+                                                           &B_shared[(global_k_offset_i - 1) % 2][local_k_offset +
+                                                                                                  warp_k_offset_i *
+                                                                                                  wmma_k][
+                                                                   warp_n_shared_offset +
+                                                                   warp_n_offset_i_serpentine * wmma_n],
+                                                           B_shared_n_true);
+
+                                    wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i_serpentine],
+                                                   A_frag[warp_m_offset_i],
+                                                   B_frag[warp_n_offset_i_serpentine],
+                                                   C_frag[warp_m_offset_i][warp_n_offset_i_serpentine]);
+                                }
+                            }
+                        }
+                    }
                 }
-            }
+
+#ifndef KEEP_C
+                //  Update C, freeing registers for copying A and B
+#ifdef UNROLL
+#pragma unroll
 #endif
+                            for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+                            {
+#ifdef UNROLL
+#pragma unroll
+#endif
+                                for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
+                                {
+#ifdef CACHE_C
+                                    int m_index = warp_m_shared_offset + warp_m_offset_i * wmma_m;
+                                    int n_index = warp_n_shared_offset + warp_n_offset_i * wmma_n;
+                                    wmma::store_matrix_sync(&C_shared[m_index][n_index], C_frag[warp_m_offset_i][warp_n_offset_i], C_shared_n_true, wmma::mem_row_major);
+#else
+                                    int m_index = warp_m_global_offset + warp_m_offset_i * wmma_m;
+                                    int n_index = warp_n_global_offset + warp_n_offset_i * wmma_n;
+                                    wmma::store_matrix_sync(&C[m_index * n + n_index], C_frag[warp_m_offset_i][warp_n_offset_i], n, wmma::mem_row_major);
+#endif
+                                }
+                            }
+#endif
+            }
         }
         __syncthreads();
     }
