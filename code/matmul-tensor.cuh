@@ -115,7 +115,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         #endif
         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
         {
-            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], 0.0);
+            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], (accType) 0.0);
         }
     }
 #endif
@@ -146,7 +146,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 if (tile_m_index < shared_m && tile_k_index < shared_k)
                 {
                     A_shared[global_k_offset_i % 2][tile_m_index][tile_k_index] =
-                            A_m_index < m && A_k_index < k ? A[A_m_index * k + A_k_index] : (elmType) 0.0;
+                            A_m_index < m && A_k_index < k ? A[A_m_index * k + A_k_index] : (elmType) 0.0f;
                 }
             }
 
@@ -165,7 +165,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 {
                     //            TODO: try to avoid ternary statement
                     B_shared[global_k_offset_i % 2][tile_k_index][tile_n_index] =
-                            B_k_index < k && B_n_index < n ? B[B_k_index * n + B_n_index] : (elmType) 0.0;
+                            B_k_index < k && B_n_index < n ? B[B_k_index * n + B_n_index] : (elmType) 0.0f;
                 }
             }
         }
