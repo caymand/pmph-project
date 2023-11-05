@@ -199,6 +199,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             {
                 int local_k_offset = local_k_offset_i * wmma_k * warp_tiles_k;
 
+//                TODO: why not copy to shared here?
+
                 wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[warp_tiles_m];
                 wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[warp_tiles_n];
 
@@ -223,11 +225,11 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
 //                            Serpentine iteration to increase temporal locality and reduce register usage
-                            warp_n_offset_i = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 - warp_n_offset_i) : warp_n_offset_i;
+                            int warp_n_offset_i_serpentine = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 - warp_n_offset_i) : warp_n_offset_i;
 
-                            wmma::load_matrix_sync(B_frag[warp_n_offset_i], &B_shared[local_k_offset + warp_k_offset_i * wmma_k][warp_n_shared_offset+ warp_n_offset_i * wmma_n], B_shared_n_true);
+                            wmma::load_matrix_sync(B_frag[warp_n_offset_i_serpentine], &B_shared[local_k_offset + warp_k_offset_i * wmma_k][warp_n_shared_offset+ warp_n_offset_i_serpentine * wmma_n], B_shared_n_true);
 
-                            wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i], A_frag[warp_m_offset_i], B_frag[warp_n_offset_i], C_frag[warp_m_offset_i][warp_n_offset_i]);
+                            wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i_serpentine], A_frag[warp_m_offset_i], B_frag[warp_n_offset_i_serpentine], C_frag[warp_m_offset_i][warp_n_offset_i_serpentine]);
                         }
                     }
                 }
