@@ -72,8 +72,9 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     unsigned int warp_n_global_offset = block_n_global_offset + warp_n_shared_offset;
 
     //    Pad to avoid bank conflicts
-    constexpr unsigned int A_shared_k_true = shared_k + SHARED_PADDING;
-    __shared__ elmType A_shared[2][shared_m][A_shared_k_true];
+//    constexpr unsigned int A_shared_k_true = shared_k + SHARED_PADDING;
+    constexpr unsigned int A_shared_m_true = shared_m + SHARED_PADDING;
+    __shared__ elmType A_shared[2][shared_k][A_shared_m_true];
 
     //    Pad to avoid bank conflicts
     constexpr unsigned int B_shared_n_true = shared_n + SHARED_PADDING;
@@ -137,16 +138,16 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             for (int i = 0; i < copies_per_thread_A; i++)
             {
                 unsigned int tile_i = threadIdx.x + i * blockDim.x;
-                unsigned int tile_m_index = tile_i / shared_k;
-                unsigned int tile_k_index = tile_i % shared_k;
+                unsigned int tile_m_index = tile_i / shared_m;
+                unsigned int tile_k_index = tile_i % shared_m;
                 unsigned int A_m_index = block_m_global_offset + tile_m_index;
                 unsigned int A_k_index = global_k_offset + tile_k_index;
 
                 //            TODO: try to avoid ternary statement
                 if (tile_m_index < shared_m && tile_k_index < shared_k)
                 {
-                    A_shared[global_k_offset_i % 2][tile_m_index][tile_k_index] =
-                            A_m_index < m && A_k_index < k ? A[A_m_index * k + A_k_index] : (elmType) 0.0f;
+                    A_shared[global_k_offset_i % 2][tile_k_index][tile_m_index] =
+                            A_m_index < m && A_k_index < k ? A[A_k_index * k + A_m_index] : (elmType) 0.0f;
                 }
             }
 
@@ -236,8 +237,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
                         {
                             wmma::load_matrix_sync(A_frag[warp_m_offset_i],
-                                                   &A_shared[(global_k_offset_i - 1) % 2][warp_m_shared_offset + warp_m_offset_i * wmma_m][
-                                                           local_k_offset + warp_k_offset_i * wmma_k], A_shared_k_true);
+                                                   &A_shared[(global_k_offset_i - 1) % 2][
+                                                           local_k_offset + warp_k_offset_i * wmma_k][warp_m_shared_offset + warp_m_offset_i * wmma_m], A_shared_m_true);
 
     #ifdef UNROLL
     #pragma unroll
