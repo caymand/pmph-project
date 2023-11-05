@@ -13,13 +13,17 @@ OPTIONS= -Xptxas=-v \
 	-DBLOCK_TILES_M=8 \
 	-DBLOCK_TILES_N=4 \
 	-DBLOCK_TILES_K=1 \
-	-DUNROLL 
+	-DBLOCKS_PER_SM=2 \
+	-DUNROLL
 
 MAIN = main
 GOLDEN_CPU = golden_cpu.o
 
 # depends on building the main file
 all: $(MAIN)
+
+run: $(MAIN)
+	./$(MAIN)
 
 # depends on headers and source
 $(MAIN): $(CFILES) $(HEADERS)
