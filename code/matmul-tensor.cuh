@@ -12,6 +12,10 @@
 #define WARP_SIZE 32
 #define SHARED_PADDING 8
 
+#ifndef LOAD_TYPE
+#define LOAD_TYPE float2
+#endif
+
 
 #include <stdint.h>
 #include <mma.h>
@@ -53,6 +57,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
     constexpr int copies_per_thread_A = (shared_m * shared_k + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_B = (shared_k * shared_n + threads_per_block) / threads_per_block;
+
+    constexpr int elms_per_load = sizeof(LOAD_TYPE) / sizeof(elmType);
 
 //    TODO: try moving these to use?
     unsigned int block_m_global_offset = blockIdx.y * shared_m;
@@ -109,38 +115,53 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 #ifdef UNROLL
 #pragma unroll
 #endif
-            for (int i = 0; i < copies_per_thread_A; i++)
+            for (int i = 0; i < (copies_per_thread_A + elms_per_load) / elms_per_load; i++)
             {
                 unsigned int tile_i = threadIdx.x + i * blockDim.x;
-                unsigned int tile_m_index = tile_i / shared_k;
-                unsigned int tile_k_index = tile_i % shared_k;
+                unsigned int tile_m_index = tile_i / (shared_k / elms_per_load);
+                unsigned int tile_k_index = tile_i % (shared_k / elms_per_load);
                 unsigned int A_m_index = block_m_global_offset + tile_m_index;
-                unsigned int A_k_index = global_k_offset + tile_k_index;
+                unsigned int A_k_index = (global_k_offset / elms_per_load) + tile_k_index;
 
                 //            TODO: try to avoid ternary statement
-                if (tile_m_index < shared_m && tile_k_index < shared_k)
+                if (tile_m_index < shared_m && tile_k_index < (shared_k / elms_per_load))
                 {
-                    A_shared[global_k_offset_i % 2][tile_m_index][tile_k_index] =
-                            A_m_index < m && A_k_index < k ? A[A_m_index * k + A_k_index] : (elmType) 0.0f;
+                    reinterpret_cast<LOAD_TYPE *>(A_shared)[(global_k_offset_i % 2) * shared_m * (A_shared_k_true / elms_per_load) + tile_m_index * (A_shared_k_true / elms_per_load) + tile_k_index] =
+                            A_m_index < m && A_k_index < k / elms_per_load ? reinterpret_cast<LOAD_TYPE *>(A)[A_m_index * (k / elms_per_load) + A_k_index] : LOAD_TYPE();
                 }
             }
 
 #ifdef UNROLL
 #pragma unroll
 #endif
-            for (int i = 0; i < copies_per_thread_B; i++)
+//            for (int i = 0; i < (copies_per_thread_B + 2) / 2; i++)
+//            {
+//                unsigned int tile_i = threadIdx.x + i * blockDim.x;
+//                unsigned int tile_k_index = tile_i / (shared_n / 2);
+//                unsigned int tile_n_index = tile_i % (shared_n / 2);
+//                unsigned int B_k_index = global_k_offset + tile_k_index;
+//                unsigned int B_n_index = block_n_global_offset / 2 + tile_n_index;
+//
+//                if (tile_k_index < shared_k && tile_n_index < shared_n / 2)
+//                {
+//                    //            TODO: try to avoid ternary statement
+//                    reinterpret_cast<half2 *>(B_shared)[(global_k_offset_i % 2) * shared_k * (B_shared_n_true / 2) + tile_k_index * (B_shared_n_true / 2) + tile_n_index] =
+//                        B_k_index < k && B_n_index < n / 2 ? reinterpret_cast<half2 *>(B)[B_k_index * (n / 2) + B_n_index] : half2();
+//                }
+//            }
+            for (int i = 0; i < (copies_per_thread_B + elms_per_load) / elms_per_load; i++)
             {
                 unsigned int tile_i = threadIdx.x + i * blockDim.x;
-                unsigned int tile_k_index = tile_i / shared_n;
-                unsigned int tile_n_index = tile_i % shared_n;
+                unsigned int tile_k_index = tile_i / (shared_n / elms_per_load);
+                unsigned int tile_n_index = tile_i % (shared_n / elms_per_load);
                 unsigned int B_k_index = global_k_offset + tile_k_index;
-                unsigned int B_n_index = block_n_global_offset + tile_n_index;
+                unsigned int B_n_index = block_n_global_offset / elms_per_load + tile_n_index;
 
-                if (tile_k_index < shared_k && tile_n_index < shared_n)
+                if (tile_k_index < shared_k && tile_n_index < shared_n / elms_per_load)
                 {
                     //            TODO: try to avoid ternary statement
-                    B_shared[global_k_offset_i % 2][tile_k_index][tile_n_index] =
-                            B_k_index < k && B_n_index < n ? B[B_k_index * n + B_n_index] : (elmType) 0.0f;
+                    reinterpret_cast<LOAD_TYPE *>(B_shared)[(global_k_offset_i % 2) * shared_k * (B_shared_n_true / elms_per_load) + tile_k_index * (B_shared_n_true / elms_per_load) + tile_n_index] =
+                            B_k_index < k && B_n_index < n / elms_per_load ? reinterpret_cast<LOAD_TYPE *>(B)[B_k_index * (n / elms_per_load) + B_n_index] : LOAD_TYPE();
                 }
             }
         }
