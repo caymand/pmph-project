@@ -22,7 +22,7 @@ def plot_performance():
     plt.plot(matrix_size, tensor_optim, marker="s")
     #plt.plot(matrix_size, cublas, marker="s")
     #plt.yscale("log")
-    plt.legend(["Cuda Cores", "Tensor Core Naive", "Tensor Core Optimized", "Cublas"])
+    plt.legend(["Cuda Cores", "Tensor Core Naive", "Tensor Core Optimized", "cuBLAS"])
     plt.ylabel("GFlops")
     plt.xlabel("Size WxWxW")
     plt.title("Matrix multiplication on MxNxK matrices")
@@ -31,20 +31,23 @@ def plot_performance():
     
 
 def plot_optimizations():
-    keep_c = 37243.9
+    keep_c_no_vec = 37243.9
     cache_c = 5967.14
     global_c = 12668.2
     keep_c_bank_confligt = 19627.9
+    vec_float2 = 81619.4
 
     plt.bar([
         "C in global", 
         "C in shared", 
-        "Bank conflicts",
-        "C in registers",], 
+        "C Bank conflicts",
+        "C in registers",
+        "Vectorized copy to shared"], 
         [global_c, 
         cache_c,         
         keep_c_bank_confligt,
-        keep_c, ])
+        keep_c_no_vec, 
+        vec_float2])
     plt.ylabel("GFlops")
     plt.title("Optimization strategies for 4096x4096x4096 MMM")
     plt.savefig("optimizations.png", dpi=92, bbox_inches="tight")
