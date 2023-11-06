@@ -39,9 +39,6 @@ using namespace nvcuda;
 #endif
 #endif
 
-
-// TODO: set maxBlocksPerCluster?
-
 template <class elmType, class accType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int warp_tiles_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
 __global__ void
 #ifdef BLOCKS_PER_SM
@@ -53,21 +50,17 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
     constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
     constexpr unsigned int shared_k = wmma_k * warp_tiles_k * block_tiles_k;
-//    TODO: use warp_tiles_k
-
     constexpr int copies_per_thread_A = (shared_m * shared_k + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_B = (shared_k * shared_n + threads_per_block) / threads_per_block;
 
     constexpr int elms_per_load = sizeof(LOAD_TYPE) / sizeof(elmType);
 
-//    TODO: try moving these to use?
     unsigned int block_m_global_offset = blockIdx.y * shared_m;
     unsigned int block_n_global_offset = blockIdx.x * shared_n;
 
     unsigned int warpID = threadIdx.x / warpSize;
-//    unsigned int laneID = threadIdx.x % warpSize;
 
-//    Assumes num_warps >= block_tiles_m * block_tiles_n
+    // Assumes num_warps >= block_tiles_m * block_tiles_n
     unsigned int warp_m_index = warpID / block_tiles_n;
     unsigned int warp_n_index = warpID % block_tiles_n;
 
@@ -77,17 +70,17 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     unsigned int warp_m_global_offset = block_m_global_offset + warp_m_shared_offset;
     unsigned int warp_n_global_offset = block_n_global_offset + warp_n_shared_offset;
 
-    //    Pad to avoid bank conflicts
+    // Pad to avoid bank conflicts
     constexpr unsigned int A_shared_k_true = shared_k + SHARED_PADDING;
     __shared__ elmType A_shared[2][shared_m][A_shared_k_true];
 
-    //    Pad to avoid bank conflicts
+    // Pad to avoid bank conflicts
     constexpr unsigned int B_shared_n_true = shared_n + SHARED_PADDING;
     __shared__ elmType B_shared[2][shared_k][B_shared_n_true];
 
     wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[warp_tiles_m][warp_tiles_n];
 
-//    Initialize C_frag to zero
+    // Initialize C_frag to zero
     #ifdef UNROLL
     #pragma unroll
     #endif
@@ -102,16 +95,13 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         }
     }
 
-//    for (int global_k_offset = 0; global_k_offset < k; global_k_offset += shared_k) {
-
     unsigned int k_iterations = (k + shared_k) / shared_k;
     for (int global_k_offset_i = 0; global_k_offset_i < k_iterations + 1; global_k_offset_i++) {
         int global_k_offset = global_k_offset_i * shared_k;
 
-//        TODO: duplicate code instead of if?
         if (global_k_offset_i != k_iterations)
         {
-            //      Copy A and B to shared memory
+        // Copy A and B to shared memory
 #ifdef UNROLL
 #pragma unroll
 #endif
@@ -123,32 +113,16 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 unsigned int A_m_index = block_m_global_offset + tile_m_index;
                 unsigned int A_k_index = (global_k_offset / elms_per_load) + tile_k_index;
 
-                //            TODO: try to avoid ternary statement
                 if (tile_m_index < shared_m && tile_k_index < (shared_k / elms_per_load))
                 {
                     reinterpret_cast<LOAD_TYPE *>(A_shared)[(global_k_offset_i % 2) * shared_m * (A_shared_k_true / elms_per_load) + tile_m_index * (A_shared_k_true / elms_per_load) + tile_k_index] =
-                            A_m_index < m && A_k_index < k / elms_per_load ? reinterpret_cast<LOAD_TYPE *>(A)[A_m_index * (k / elms_per_load) + A_k_index] : LOAD_TYPE();
+                        A_m_index < m && A_k_index < k / elms_per_load ? reinterpret_cast<LOAD_TYPE *>(A)[A_m_index * (k / elms_per_load) + A_k_index] : LOAD_TYPE();
                 }
             }
 
 #ifdef UNROLL
 #pragma unroll
 #endif
-//            for (int i = 0; i < (copies_per_thread_B + 2) / 2; i++)
-//            {
-//                unsigned int tile_i = threadIdx.x + i * blockDim.x;
-//                unsigned int tile_k_index = tile_i / (shared_n / 2);
-//                unsigned int tile_n_index = tile_i % (shared_n / 2);
-//                unsigned int B_k_index = global_k_offset + tile_k_index;
-//                unsigned int B_n_index = block_n_global_offset / 2 + tile_n_index;
-//
-//                if (tile_k_index < shared_k && tile_n_index < shared_n / 2)
-//                {
-//                    //            TODO: try to avoid ternary statement
-//                    reinterpret_cast<half2 *>(B_shared)[(global_k_offset_i % 2) * shared_k * (B_shared_n_true / 2) + tile_k_index * (B_shared_n_true / 2) + tile_n_index] =
-//                        B_k_index < k && B_n_index < n / 2 ? reinterpret_cast<half2 *>(B)[B_k_index * (n / 2) + B_n_index] : half2();
-//                }
-//            }
             for (int i = 0; i < (copies_per_thread_B + elms_per_load) / elms_per_load; i++)
             {
                 unsigned int tile_i = threadIdx.x + i * blockDim.x;
@@ -159,23 +133,17 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
                 if (tile_k_index < shared_k && tile_n_index < shared_n / elms_per_load)
                 {
-                    //            TODO: try to avoid ternary statement
                     reinterpret_cast<LOAD_TYPE *>(B_shared)[(global_k_offset_i % 2) * shared_k * (B_shared_n_true / elms_per_load) + tile_k_index * (B_shared_n_true / elms_per_load) + tile_n_index] =
                             B_k_index < k && B_n_index < n / elms_per_load ? reinterpret_cast<LOAD_TYPE *>(B)[B_k_index * (n / elms_per_load) + B_n_index] : LOAD_TYPE();
                 }
             }
         }
-
-//        TODO: not needed anymore?
-//        __syncthreads();
-//      End of copy to shared memory
+        // End of copy to shared memory
 
         if (global_k_offset_i != 0) {
-//        TODO: move check into loop?
             if (warp_m_global_offset < m && warp_n_global_offset < n)
             {
-
-    //          Do Matrix multiplication
+                // Do Matrix multiplication
     #ifdef UNROLL
     #pragma unroll
     #endif
@@ -186,11 +154,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 {
                     int local_k_offset = local_k_offset_i * wmma_k * warp_tiles_k;
 
-    //                TODO: why not copy to shared here?
-
                     wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[warp_tiles_m];
                     wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[warp_tiles_n];
-
     #ifdef UNROLL
     #pragma unroll
     #endif
@@ -205,23 +170,21 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
                         {
                             wmma::load_matrix_sync(A_frag[warp_m_offset_i],
-                                                   &A_shared[(global_k_offset_i - 1) % 2][warp_m_shared_offset + warp_m_offset_i * wmma_m][
-                                                           local_k_offset + warp_k_offset_i * wmma_k], A_shared_k_true);
-
+                                                   &A_shared[(global_k_offset_i - 1) % 2][warp_m_shared_offset + warp_m_offset_i * wmma_m]
+                                                            [local_k_offset + warp_k_offset_i * wmma_k], A_shared_k_true);
     #ifdef UNROLL
     #pragma unroll
     #endif
                             for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                             {
-    //                            Serpentine iteration to increase temporal locality and reduce register usage
+                                // Serpentine iteration to increase temporal locality and reduce register usage
                                 int warp_n_offset_i_serpentine = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 -
                                                                                           warp_n_offset_i)
                                                                                        : warp_n_offset_i;
 
                                 wmma::load_matrix_sync(B_frag[warp_n_offset_i_serpentine],
-                                                       &B_shared[(global_k_offset_i - 1) % 2][local_k_offset + warp_k_offset_i * wmma_k][
-                                                               warp_n_shared_offset + warp_n_offset_i_serpentine * wmma_n],
-                                                       B_shared_n_true);
+                                                       &B_shared[(global_k_offset_i - 1) % 2][local_k_offset + warp_k_offset_i * wmma_k]
+                                                                [warp_n_shared_offset + warp_n_offset_i_serpentine * wmma_n], B_shared_n_true);
 
                                 wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i_serpentine], A_frag[warp_m_offset_i],
                                                B_frag[warp_n_offset_i_serpentine],
@@ -276,10 +239,7 @@ __global__ void matMulTiledTensorNaive(elmType* A, elmType* B, accType* C, unsig
         // Again we spawn block_tiles_n warps for the block in the n dimension.
         // This finds the starting column for all warps
         int B_col = warp_n * wmma_n;
-        // printf("A_row: %d, B_col: %d\n", A_row, B_col);
         if (A_row < m && A_col < k && B_row < k && B_col < n) {
-            // printf("A_row: %d, B_col: %d, i: %d\n", A_col, B_col, i);
-            // Watch out for what leading dimension means
             wmma::load_matrix_sync(A_frag, &A[A_row * k + A_col], k);
             wmma::load_matrix_sync(B_frag, &B[B_row * n + B_col], n);
             wmma::mma_sync(C_frag, A_frag, B_frag, C_frag);
@@ -290,7 +250,6 @@ __global__ void matMulTiledTensorNaive(elmType* A, elmType* B, accType* C, unsig
     int C_col = warp_n * wmma_n;
     
     if (C_row < m && C_col < n) {
-        // printf("C_row: %d, C_col: %d\n", C_row, C_col);
         wmma::store_matrix_sync(&C[C_row * n + C_col], C_frag, n, wmma::mem_row_major);
     }    
 }
