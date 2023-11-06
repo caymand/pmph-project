@@ -18,12 +18,13 @@ def plot_performance():
     
     plt.plot(matrix_size, register_tiled, marker="s")
     plt.plot(matrix_size, tensor_naive, marker="s")
-    plt.plot(matrix_size, tensor_optim, marker="s")    
+    plt.plot(matrix_size, tensor_optim, marker="s")
+    plt.plot(matrix_size, cublas, marker="s")    
     plt.legend(["Cuda Cores", "Tensor Core Naive", "Tensor Core Optimized", "cuBLAS"])
     plt.ylabel("GFlops")
     plt.xlabel("Size WxWxW")
     plt.title("Matrix multiplication on MxNxK matrices")
-    plt.savefig("performance_no_cublas.png", dpi=92, bbox_inches="tight")
+    plt.savefig("performance.png", dpi=92, bbox_inches="tight")
     plt.show()
     
 
@@ -38,17 +39,21 @@ def plot_optimizations():
     plt.bar([
         "C in global", 
         "C in shared", 
-        "C Bank conflicts",
+        "C in reg + bank conflicts",
+        "C in reg + vectorized + bank conflicts",
         "C in registers",
-        "Vectorized + bank conflicts",
-        "Vectorized copy to shared"], 
-        [global_c, 
+        "C in reg + vectorized copy to shared"], 
+        [
         cache_c,         
-        keep_c_bank_confligt,
+        global_c, 
+        keep_c_bank_conflict,
         vec_flaot2_bank_conflict,
         keep_c_no_vec, 
         vec_float2])
     plt.ylabel("GFlops")
+    plt.xticks(rotation=45, ha="right")
+    plt.margins(y=0.2)
+    plt.tight_layout() 
     plt.title("Optimization strategies for 4096x4096x4096 MMM")
     plt.savefig("optimizations.png", dpi=92, bbox_inches="tight")
     plt.show()
