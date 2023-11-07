@@ -98,7 +98,7 @@ long int benchmark_optimized_tensor_mmm(
     constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
     constexpr unsigned int shared_k = wmma_k * block_tiles_k;
 
-    constexpr unsigned int shared_memory_used = shared_m * (shared_k + SHARED_PADDING) * sizeof(elmT) + shared_k * (shared_n + SHARED_PADDING) * sizeof(elmT) * 2;
+    constexpr unsigned int shared_memory_used = (shared_m * (shared_k + SHARED_PADDING)+ shared_k * (shared_n + SHARED_PADDING)) * sizeof(elmT) * 2;
 
     printf("    Shared memory used: %d/%d bytes (%.0f%%)\n", shared_memory_used, SHARED_MEM_SIZE, (float) shared_memory_used / SHARED_MEM_SIZE * 100);
 
