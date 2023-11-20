@@ -62,11 +62,6 @@ long int benchmark_optimized_tensor_mmm(
 #else
     constexpr int warp_tiles_n = 2;
 #endif
-#ifdef WARP_TILES_K
-    constexpr int warp_tiles_k = WARP_TILES_K;
-#else
-    constexpr int warp_tiles_k = 2;
-#endif
 #ifdef BLOCK_TILES_M
     constexpr int block_tiles_m = BLOCK_TILES_M;
 #else
@@ -101,15 +96,10 @@ long int benchmark_optimized_tensor_mmm(
 
     constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
     constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
-    constexpr unsigned int shared_k = wmma_k * warp_tiles_k * block_tiles_k;
+    constexpr unsigned int shared_k = wmma_k * block_tiles_k;
 
-    constexpr unsigned int shared_memory_used_AB = shared_m * (shared_k + SHARED_PADDING) * sizeof(elmT) + shared_k * (shared_n + SHARED_PADDING) * sizeof(elmT);
-#ifdef CACHE_C
-//    Add space for caching C
-    constexpr unsigned int shared_memory_used = shared_memory_used_AB + shared_m * (shared_n + SHARED_PADDING) * sizeof(elmAccT);
-#else
-    constexpr unsigned int shared_memory_used = shared_memory_used_AB;
-#endif
+    constexpr unsigned int shared_memory_used = (shared_m * (shared_k + SHARED_PADDING)+ shared_k * (shared_n + SHARED_PADDING)) * sizeof(elmT) * 2;
+
     printf("    Shared memory used: %d/%d bytes (%.0f%%)\n", shared_memory_used, SHARED_MEM_SIZE, (float) shared_memory_used / SHARED_MEM_SIZE * 100);
 
 
@@ -117,7 +107,7 @@ long int benchmark_optimized_tensor_mmm(
 
     t.start();
     for (int i = 0; i < n_runs; i++) {
-        matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, warp_tiles_k, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block><<<grid, block>>>(
+        matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block><<<grid, block>>>(
                 A_device, B_device, C_device, m, n, k
         );
     }

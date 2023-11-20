@@ -8,7 +8,6 @@ OPTIONS= -Xptxas=-v \
 	-lcublas \
 	-DWARP_TILES_M=1 \
 	-DWARP_TILES_N=2 \
-	-DWARP_TILES_K=1 \
 	-DBLOCK_TILES_M=8 \
 	-DBLOCK_TILES_N=4 \
 	-DBLOCK_TILES_K=2 \
