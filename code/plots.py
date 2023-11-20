@@ -34,6 +34,7 @@ def plot_optimizations():
     keep_c_bank_conflict = 19627.9
     vec_flaot2_bank_conflict = 25050.3
     keep_c_no_vec = 37243.9
+    no_shared = 32243.9
     vec_float2 = 81619.4
 
     plt.bar([
@@ -41,6 +42,7 @@ def plot_optimizations():
         "C in shared", 
         "C in reg + bank conflicts",
         "C in reg + vectorized + bank conflicts",
+        "No shared memory",
         "C in registers",
         "C in reg + vectorized copy to shared"], 
         [
@@ -48,6 +50,7 @@ def plot_optimizations():
         global_c, 
         keep_c_bank_conflict,
         vec_flaot2_bank_conflict,
+                no_shared,
         keep_c_no_vec, 
         vec_float2])
     plt.ylabel("GFlops")
