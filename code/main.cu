@@ -503,16 +503,16 @@ int main(int argc, char * argv[])
         n_runs, m, n, k, A_accT, B_accT, C_target, C_target, std::string("GPU register tiled")
     );
 
-    benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_naive, true>(
-        n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor naive")
-    );
+//    benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_naive, true>(
+//        n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor naive")
+//    );
+
+//    benchmark_kernel<element_type, acc_type, 2, mm_kernel::cublas, true>(
+//        n_runs, m, n, k, A, B, C, C_target, std::string("cublas")
+//    );
 
     benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_optimized, true>(
-        n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor optimized")
-    );
-
-    benchmark_kernel<element_type, acc_type, 2, mm_kernel::cublas, true>(
-        n_runs, m, n, k, A, B, C, C_target, std::string("cublas")
+            n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor optimized")
     );
 
     cudaFree(A.to_gpu());
