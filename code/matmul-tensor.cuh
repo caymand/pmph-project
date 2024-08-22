@@ -13,7 +13,7 @@
 #define SHARED_PADDING 8
 
 #ifndef LOAD_TYPE
-#define LOAD_TYPE float2
+#define LOAD_TYPE double2
 #endif
 
 
@@ -137,7 +137,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 {
 //                    reinterpret_cast<LOAD_TYPE *>(A_shared)[load_buffer * shared_m * (A_shared_k_true / elms_per_load) + tile_m_index * (A_shared_k_true / elms_per_load) + tile_k_index] =
 //                        A_m_index < m && A_k_index < k / elms_per_load ? reinterpret_cast<LOAD_TYPE *>(A)[A_m_index * (k / elms_per_load) + A_k_index] : LOAD_TYPE();
-//                    TODO: merge all copies of each thread into one
+//                    TODO: merge all copies of each thread into one?
                     if (A_m_index < m && A_k_index < k / elms_per_load) {
                         cuda::memcpy_async(&reinterpret_cast<LOAD_TYPE *>(A_shared)[load_buffer * shared_m * (A_shared_k_true / elms_per_load) + tile_m_index * (A_shared_k_true / elms_per_load) + tile_k_index], &reinterpret_cast<LOAD_TYPE *>(A)[A_m_index * (k / elms_per_load) + A_k_index], sizeof(LOAD_TYPE), pipeline);
                     } else {
