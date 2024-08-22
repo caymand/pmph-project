@@ -406,6 +406,7 @@ void run_mmm_kernel(
         memset(C.to_cpu(), 0, m * n);
     } else {
         printGFlops(total_elapsed, total_ops * n_runs);
+        printf("Average Time elapsed: %ld ms\n", total_elapsed / n_runs);
     }
 }
 
