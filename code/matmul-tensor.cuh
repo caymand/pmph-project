@@ -83,13 +83,11 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
     // Pad to avoid bank conflicts
     constexpr unsigned int A_shared_k_true = shared_k + SHARED_PADDING;
-//    __shared__ elmType A_shared[num_stages][shared_m][A_shared_k_true];
     auto A_shared = reinterpret_cast<elmType *>(dynamic_shared);
 
     // Pad to avoid bank conflicts
     constexpr unsigned int B_shared_n_true = shared_n + SHARED_PADDING;
-    __shared__ elmType B_shared[num_stages][shared_k][B_shared_n_true];
-
+    auto B_shared = A_shared + num_stages * shared_m * A_shared_k_true;
 
     cg::thread_block block = cg::this_thread_block();
     // Allocate shared storage for a cuda::pipeline:
@@ -213,8 +211,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 //                                                                                   : warp_n_offset_i;
                             wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag;
                             wmma::load_matrix_sync(B_frag,
-                                                   &B_shared[compute_buffer][local_k_offset]
-                                                            [warp_n_shared_offset + warp_n_offset_i * wmma_n], B_shared_n_true);
+//                                                   &B_shared[compute_buffer][local_k_offset][warp_n_shared_offset + warp_n_offset_i * wmma_n], B_shared_n_true);
+                                                   &B_shared[compute_buffer * shared_k * B_shared_n_true + local_k_offset * B_shared_n_true + warp_n_shared_offset + warp_n_offset_i * wmma_n], B_shared_n_true);
 
                             wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i], A_frag,
                                            B_frag,
