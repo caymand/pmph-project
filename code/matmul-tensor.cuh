@@ -180,19 +180,19 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             if (warp_m_global_offset < m && warp_n_global_offset < n)
             {
                 pipeline.consumer_wait();
-    #ifdef UNROLL
-    #pragma unroll
-    #endif
-    #ifdef NOUNROLL
-    #pragma unroll 1
-    #endif
+                #ifdef UNROLL
+                #pragma unroll
+                #endif
+                #ifdef NOUNROLL
+                #pragma unroll 1
+                #endif
                 for (int local_k_offset_i = 0; local_k_offset_i < block_tiles_k; local_k_offset_i++)
                 {
                     int local_k_offset = local_k_offset_i * wmma_k;
 
-    #ifdef UNROLL
-    #pragma unroll
-    #endif
+                    #ifdef UNROLL
+                    #pragma unroll
+                    #endif
                     for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
                     {
                         wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag;
@@ -200,23 +200,26 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 //                                               &A_shared[compute_buffer][warp_m_shared_offset + warp_m_offset_i * wmma_m][local_k_offset], A_shared_k_true);
                                                &A_shared[compute_buffer * shared_m * A_shared_k_true + (warp_m_shared_offset + warp_m_offset_i * wmma_m) * A_shared_k_true + local_k_offset], A_shared_k_true);
 
-#ifdef UNROLL
-#pragma unroll
-#endif
+                        #ifdef UNROLL
+                        #pragma unroll
+                        #endif
                         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
+                            #ifdef SERPENTINE
                             // Serpentine iteration to increase temporal locality and reduce register usage
-//                            int warp_n_offset_i_serpentine = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 -
-//                                                                                      warp_n_offset_i)
-//                                                                                   : warp_n_offset_i;
+                            int warp_n_offset_i_serpentine = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 - warp_n_offset_i) : warp_n_offset_i;
+                            #else
+                            // Serpentine off
+                            int warp_n_offset_i_serpentine = warp_n_offset_i;
+                            #endif
+
                             wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag;
                             wmma::load_matrix_sync(B_frag,
-//                                                   &B_shared[compute_buffer][local_k_offset][warp_n_shared_offset + warp_n_offset_i * wmma_n], B_shared_n_true);
-                                                   &B_shared[compute_buffer * shared_k * B_shared_n_true + local_k_offset * B_shared_n_true + warp_n_shared_offset + warp_n_offset_i * wmma_n], B_shared_n_true);
+//                                                   &B_shared[compute_buffer][local_k_offset][warp_n_shared_offset + warp_n_offset_i_serpentine * wmma_n], B_shared_n_true);
+                                                   &B_shared[compute_buffer * shared_k * B_shared_n_true + local_k_offset * B_shared_n_true + warp_n_shared_offset + warp_n_offset_i_serpentine * wmma_n], B_shared_n_true);
 
-                            wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i], A_frag,
-                                           B_frag,
-                                           C_frag[warp_m_offset_i][warp_n_offset_i]);
+                            wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i_serpentine], A_frag, B_frag,
+                                           C_frag[warp_m_offset_i][warp_n_offset_i_serpentine]);
                         }
                     }
                 }
@@ -225,7 +228,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         }
     }
 
-//    TODO: try storing in shared first, then optimized store to global
+    // TODO: try storing in shared first, then optimized store to global
     if (warp_m_global_offset < m && warp_n_global_offset < n) {
         #ifdef UNROLL
         #pragma unroll
