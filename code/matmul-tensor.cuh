@@ -45,7 +45,7 @@ namespace cg = cooperative_groups;
 #endif
 #endif
 
-template <class elmType, class accType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
+template <class elmType, class accType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int warp_tiles_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
 __global__ void
 #ifdef BLOCKS_PER_SM
 __launch_bounds__(THREADS_PER_BLOCK, BLOCKS_PER_SM)
@@ -60,7 +60,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
     constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
     constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
-    constexpr unsigned int shared_k = wmma_k * block_tiles_k;
+    constexpr unsigned int shared_k = wmma_k * warp_tiles_k * block_tiles_k;
 
     constexpr int copies_per_thread_A = (shared_m * shared_k + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_B = (shared_k * shared_n + threads_per_block) / threads_per_block;
@@ -188,38 +188,72 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 #endif
                 for (int local_k_offset_i = 0; local_k_offset_i < block_tiles_k; local_k_offset_i++)
                 {
-                    int local_k_offset = local_k_offset_i * wmma_k;
+                    int local_k_offset = local_k_offset_i * warp_tiles_k * wmma_k;
+
+//                    TODO: add warp_tiles_k loop
+                    wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[warp_tiles_m][warp_tiles_k];
+                    wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[warp_tiles_k][warp_tiles_n];
+
 
                     #ifdef UNROLL
                     #pragma unroll
                     #endif
-                    for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+                    for (int warp_k_offset_i = 0; warp_k_offset_i < warp_tiles_k; warp_k_offset_i++)
                     {
-                        wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag;
-                        wmma::load_matrix_sync(A_frag,
-//                                               &A_shared[compute_buffer][warp_m_shared_offset + warp_m_offset_i * wmma_m][local_k_offset], A_shared_k_true);
-                                               &A_shared[compute_buffer * shared_m * A_shared_k_true + (warp_m_shared_offset + warp_m_offset_i * wmma_m) * A_shared_k_true + local_k_offset], A_shared_k_true);
+                        #ifdef UNROLL
+                        #pragma unroll
+                        #endif
+                        for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+                        {
+                            wmma::load_matrix_sync(A_frag[warp_m_offset_i][warp_k_offset_i],
+                                    //                                               &A_shared[compute_buffer][warp_m_shared_offset + warp_m_offset_i * wmma_m][local_k_offset], A_shared_k_true);
+                                                   &A_shared[compute_buffer * shared_m * A_shared_k_true +
+                                                             (warp_m_shared_offset + warp_m_offset_i * wmma_m) *
+                                                             A_shared_k_true + local_k_offset +
+                                                             warp_k_offset_i * wmma_k], A_shared_k_true);
+                        }
+
 
                         #ifdef UNROLL
                         #pragma unroll
                         #endif
                         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
-                            #ifdef SERPENTINE
-                            // Serpentine iteration to increase temporal locality and reduce register usage
-                            int warp_n_offset_i_serpentine = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 - warp_n_offset_i) : warp_n_offset_i;
-                            #else
-                            // Serpentine off
-                            int warp_n_offset_i_serpentine = warp_n_offset_i;
+                            wmma::load_matrix_sync(B_frag[warp_k_offset_i][warp_n_offset_i],
+                                    //                                                   &B_shared[compute_buffer][local_k_offset][warp_n_shared_offset + warp_n_offset_i_serpentine * wmma_n], B_shared_n_true);
+                                                   &B_shared[compute_buffer * shared_k * B_shared_n_true +
+                                                             (local_k_offset + warp_k_offset_i * wmma_k) *
+                                                             B_shared_n_true + warp_n_shared_offset +
+                                                             warp_n_offset_i * wmma_n], B_shared_n_true);
+                        }
+                    }
+
+                    #ifdef UNROLL
+                    #pragma unroll
+                    #endif
+                    for (int warp_k_offset_i = 0; warp_k_offset_i < warp_tiles_k; warp_k_offset_i++)
+                    {
+                        #ifdef UNROLL
+                        #pragma unroll
+                        #endif
+                        for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
+                        {
+                            #ifdef UNROLL
+                            #pragma unroll
                             #endif
-
-                            wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag;
-                            wmma::load_matrix_sync(B_frag,
-//                                                   &B_shared[compute_buffer][local_k_offset][warp_n_shared_offset + warp_n_offset_i_serpentine * wmma_n], B_shared_n_true);
-                                                   &B_shared[compute_buffer * shared_k * B_shared_n_true + local_k_offset * B_shared_n_true + warp_n_shared_offset + warp_n_offset_i_serpentine * wmma_n], B_shared_n_true);
-
-                            wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i_serpentine], A_frag, B_frag,
-                                           C_frag[warp_m_offset_i][warp_n_offset_i_serpentine]);
+                            for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
+                            {
+                                #ifdef SERPENTINE
+                                // Serpentine iteration to increase temporal locality and reduce register usage
+                                int warp_n_offset_i_serpentine = (warp_m_offset_i % 2) ? (warp_tiles_n - 1 - warp_n_offset_i) : warp_n_offset_i;
+                                #else
+                                // Serpentine off
+                                int warp_n_offset_i_serpentine = warp_n_offset_i;
+                                #endif
+                                wmma::mma_sync(C_frag[warp_m_offset_i][warp_n_offset_i_serpentine],
+                                               A_frag[warp_m_offset_i][warp_k_offset_i], B_frag[warp_k_offset_i][warp_n_offset_i_serpentine],
+                                               C_frag[warp_m_offset_i][warp_n_offset_i_serpentine]);
+                            }
                         }
                     }
                 }
