@@ -53,6 +53,9 @@ __launch_bounds__(THREADS_PER_BLOCK, BLOCKS_PER_SM)
 __launch_bounds__(THREADS_PER_BLOCK)
 #endif
 matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
+//    TODO: spread use more evenly across A_shared and B_shared
+//    extern __shared__ int dynamic_shared[];
+
     constexpr unsigned int num_stages = 2;
 
     constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
@@ -81,6 +84,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     // Pad to avoid bank conflicts
     constexpr unsigned int A_shared_k_true = shared_k + SHARED_PADDING;
     __shared__ elmType A_shared[num_stages][shared_m][A_shared_k_true];
+//    auto A_shared = reinterpret_cast<elmType *>(dynamic_shared);
 
     // Pad to avoid bank conflicts
     constexpr unsigned int B_shared_n_true = shared_n + SHARED_PADDING;
@@ -195,8 +199,9 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                     {
                         wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag;
                         wmma::load_matrix_sync(A_frag,
-                                               &A_shared[compute_buffer][warp_m_shared_offset + warp_m_offset_i * wmma_m]
-                                                        [local_k_offset], A_shared_k_true);
+                                               &A_shared[compute_buffer][warp_m_shared_offset + warp_m_offset_i * wmma_m][local_k_offset], A_shared_k_true);
+//                                               &A_shared[compute_buffer * shared_m * A_shared_k_true + (warp_m_shared_offset + warp_m_offset_i * wmma_m) * A_shared_k_true + local_k_offset], A_shared_k_true);
+
 #ifdef UNROLL
 #pragma unroll
 #endif
