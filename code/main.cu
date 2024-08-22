@@ -106,7 +106,7 @@ long int benchmark_optimized_tensor_mmm(
     printf("    Shared memory used A: %d/%d bytes (%.0f%%)\n", shared_memory_used_A, SHARED_MEM_SIZE, (float) shared_memory_used_A / SHARED_MEM_SIZE * 100);
     printf("    Shared memory used B: %d/%d bytes (%.0f%%)\n", shared_memory_used_B, SHARED_MEM_SIZE, (float) shared_memory_used_B / SHARED_MEM_SIZE * 100);
 
-//    cudaFuncSetAttribute(matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block>, cudaFuncAttributeMaxDynamicSharedMemorySize, 98304);
+    cudaFuncSetAttribute(matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block>, cudaFuncAttributeMaxDynamicSharedMemorySize, 49152);
 //    cudaFuncSetAttribute(matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block>, cudaFuncAttributePreferredSharedMemoryCarveout, 100);
 
     TimeMeasurement t;
@@ -114,7 +114,7 @@ long int benchmark_optimized_tensor_mmm(
     t.start();
     for (int i = 0; i < n_runs; i++) {
 //        TODO: fix requested amount of shared memory
-        matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block><<<grid, block>>>(
+        matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, warp_tiles_m, warp_tiles_n, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block><<<grid, block, shared_memory_used_A>>>(
                 A_device, B_device, C_device, m, n, k
         );
     }
