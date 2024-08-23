@@ -321,18 +321,25 @@ __global__ void matMulTiledTensorNaive(elmType *A,
 	  // Collective Copy START
 	  ////////////////////////
 	  // Copy A to shared
-	  // We have block_tiles_m warps in the Y direction. Each needs to copy wmma_m rows	  	  
+	  // We have block_tiles_m=8 warps in the Y direction.
+	  // Each needs to copy wmma_m rows
+	  if (global_k == 0 && blockIdx.x == 0 && blockIdx.y == 31 && threadIdx.x == 0)
+	  {
+		  printf("%d\n", (blockDim.y * blockIdx.y*wmma_m + threadIdx.y * wmma_m));
+	  }
+	  
 	  for(int i = 0; i < wmma_m; i++)
-	  {	  		  
-		  unsigned local_m = threadIdx.y * wmma_m;
-		  unsigned global_m = (blockDim.y * blockIdx.y + local_m) * k;
+	  {
+		  // blockDim.y = 8
+		  unsigned local_m = threadIdx.y * wmma_m + i;
+		  unsigned global_m = (blockDim.y * blockIdx.y * wmma_m + local_m) * k;
 		  // Need to copy a row of block_tiles_k * wmma_k elements.
 		  // Then we look at the number of warps required to do this.
 		  unsigned copies_per_thread_k = (block_tiles_k * wmma_k + warpSize) / warpSize;
 		  for (int kk = 0; kk < copies_per_thread_k; kk++)
 		  {
 			  unsigned local_k = kk * warpSize + threadIdx.x;
-			  // In the case where we round up too much
+			  // In the case where we round up too much, deactivate those threads
 			  if (local_k < block_tiles_k * wmma_k) {
 				  
 				  elmType toShared;
@@ -344,6 +351,7 @@ __global__ void matMulTiledTensorNaive(elmType *A,
 				  {
 					  toShared = A[global_m + global_k + local_k];
 				  }
+				  Ashared[local_m][local_k] = toShared;
 			  }			  
 			  
 		  }
@@ -356,14 +364,15 @@ __global__ void matMulTiledTensorNaive(elmType *A,
 	  
   	  for (int block_k = 0; block_k < block_tiles_k; block_k++)
 	  {		  
-		  // int A_row = threadIdx.y * wmma_m;
-		  // int A_col = block_k;
-		  int A_row = warp_m * wmma_m;
-		  int A_col = global_k + block_k * wmma_k;
+		  int A_row = threadIdx.y * wmma_m;
+		  int A_col = block_k * wmma_k;
+		  // int A_row = warp_m * wmma_m;
+		  // int A_col = global_k + block_k * wmma_k;
 		  int B_row = global_k + block_k * wmma_k;
 		  int B_col = warp_n * wmma_n;
 		  if (B_row < k && B_col < n) {
-			  wmma::load_matrix_sync(A_frag, &A[A_row * k + A_col], k);
+			  // wmma::load_matrix_sync(A_frag, &A[A_row * k + A_col], k); 
+			  wmma::load_matrix_sync(A_frag, &Ashared[A_row][A_col], shared_k);
 			  wmma::load_matrix_sync(B_frag, &B[B_row * n + B_col], n);
 			  wmma::mma_sync(C_frag, A_frag, B_frag, C_frag);
 		  }
