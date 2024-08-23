@@ -320,14 +320,10 @@ __global__ void matMulTiledTensorNaive(elmType *A,
   {
 	  // Collective Copy START
 	  ////////////////////////
+	  
 	  // Copy A to shared
 	  // We have block_tiles_m=8 warps in the Y direction.
-	  // Each needs to copy wmma_m rows
-	  if (global_k == 0 && blockIdx.x == 0 && blockIdx.y == 31 && threadIdx.x == 0)
-	  {
-		  printf("%d\n", (blockDim.y * blockIdx.y*wmma_m + threadIdx.y * wmma_m));
-	  }
-	  
+	  // Each needs to copy wmma_m rows	  
 	  for(int i = 0; i < wmma_m; i++)
 	  {
 		  // blockDim.y = 8
@@ -357,7 +353,21 @@ __global__ void matMulTiledTensorNaive(elmType *A,
 		  }
 		  
 	  }
-
+	  // unsigned flatThreadIdxX = blockDim.x + threadIdx.x;
+	  if (global_k == 0 && blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.y == 0)
+	  {
+		  printf("%d\n", blockDim.x);//threadIdx.x + threadIdx.y * blockDim.x);		  
+	  }	  	  
+	  // Copy B to shared
+	  for (int j = 0; j < wmma_k; j++)
+	  {
+		  unsigned local_k = threadIdx.y * wmma_m + j;
+		  unsigned global_k = (blockDim.y * blockIdx.y * wmma_k + local_k) * n;
+		  // We have spawned block_tiles_n * warpSize threads in the block.
+		  
+		  unsigned copies_per_thread_n = (block_tiles_n * wmma_n + warpSize);
+	  }
+	  
 	  __syncthreads();
 	  //////////////////////
 	  // Collective Copy END
