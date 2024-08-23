@@ -16,6 +16,10 @@
 #define LOAD_TYPE double2
 #endif
 
+#ifndef NUM_STAGES
+#define NUM_STAGES 2
+#endif
+
 
 #include <stdint.h>
 #include <mma.h>
@@ -45,7 +49,7 @@ namespace cg = cooperative_groups;
 #endif
 #endif
 
-template <class elmType, class accType, int wmma_m, int wmma_n, int wmma_k, int warp_tiles_m, int warp_tiles_n, int warp_tiles_k, int block_tiles_m, int block_tiles_n, int block_tiles_k, int threads_per_block>
+template <class elmType, class accType, unsigned int wmma_m, unsigned int wmma_n, unsigned int wmma_k, unsigned int warp_tiles_m, unsigned int warp_tiles_n, unsigned int warp_tiles_k, unsigned int block_tiles_m, unsigned int block_tiles_n, unsigned int block_tiles_k, unsigned int threads_per_block, unsigned int num_stages>
 __global__ void
 #ifdef BLOCKS_PER_SM
 __launch_bounds__(THREADS_PER_BLOCK, BLOCKS_PER_SM)
@@ -53,10 +57,7 @@ __launch_bounds__(THREADS_PER_BLOCK, BLOCKS_PER_SM)
 __launch_bounds__(THREADS_PER_BLOCK)
 #endif
 matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
-//    TODO: spread use more evenly across A_shared and B_shared
-    extern __shared__ int dynamic_shared[];
-
-    constexpr unsigned int num_stages = 2;
+    extern __shared__ char dynamic_shared[];
 
     constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
     constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
@@ -110,17 +111,17 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         #endif
         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
         {
-            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], (accType) 0.0);
+            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], accType());
         }
     }
 
     unsigned int k_iterations = (k + shared_k) / shared_k;
-    for (int global_k_offset_i = 0; global_k_offset_i < k_iterations + 1; global_k_offset_i++) {
+    for (int global_k_offset_i = 0; global_k_offset_i < k_iterations + num_stages - 1; global_k_offset_i++) {
         int global_k_offset = global_k_offset_i * shared_k;
-        int load_buffer = global_k_offset_i % 2;
-        int compute_buffer = (global_k_offset_i - 1) % 2;
+        unsigned int load_buffer = global_k_offset_i % num_stages;
+        unsigned int compute_buffer = (global_k_offset_i + 1) % num_stages;
 
-        if (global_k_offset_i != k_iterations)
+        if (global_k_offset_i < k_iterations)
         {
             // Copy A and B to shared memory (Producer Code)
             pipeline.producer_acquire();
@@ -172,10 +173,9 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 }
             }
             pipeline.producer_commit();
-            // End of copy to shared memory
         }
 
-        if (global_k_offset_i != 0) {
+        if (global_k_offset_i >= num_stages - 1) {
             // Do Matrix multiplication (Consumer Code)
             if (warp_m_global_offset < m && warp_n_global_offset < n)
             {
@@ -190,10 +190,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 {
                     int local_k_offset = local_k_offset_i * warp_tiles_k * wmma_k;
 
-//                    TODO: add warp_tiles_k loop
                     wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[warp_tiles_m][warp_tiles_k];
                     wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[warp_tiles_k][warp_tiles_n];
-
 
                     #ifdef UNROLL
                     #pragma unroll
@@ -212,7 +210,6 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                                              A_shared_k_true + local_k_offset +
                                                              warp_k_offset_i * wmma_k], A_shared_k_true);
                         }
-
 
                         #ifdef UNROLL
                         #pragma unroll
