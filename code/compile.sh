@@ -8,7 +8,7 @@ BLOCK_TILES_K=$6
 
 shift 6
 set -x
-nvcc -Xptxas=-v -O3 -std=c++17 -arch=sm_80 matmul.cu main.cu goldenSeq.cpp -o main \
+nvcc -Xptxas=-v -O3 -std=c++17 -lcublas -arch=sm_80 matmul.cu main.cu goldenSeq.cpp -o main \
     -DWARP_TILES_M=$WARP_TILES_M \
     -DWARP_TILES_N=$WARP_TILES_N \
     -DWARP_TILES_K=$WARP_TILES_K \

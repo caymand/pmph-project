@@ -120,6 +120,7 @@ long int benchmark_optimized_tensor_mmm(
 
     cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory_used);
 //    cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+//    cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
 
     TimeMeasurement t;
 
