@@ -149,25 +149,17 @@ unsigned benchmark_naive_tensor_mmm(
 {
     constexpr int block_tiles_m = 8;
     constexpr int block_tiles_n = 4;
-    constexpr int block_tiles_k = 4;
+    constexpr int block_tiles_k = 2;
     constexpr int wmma_n = 16;
     constexpr int wmma_m = 16;
     constexpr int wmma_k = 16;
 
 
-    // Let block work on block_tiles * wmma elements.
-    // there are n elements on the x direction and we know each thread works on block_tiles_n
-    int dimx = ceil(((float) n)/(wmma_n * block_tiles_n));
-    int dimy = ceil( ((float) m)/(wmma_m * block_tiles_m));
-    dim3 grid(dimx, dimy, 1);
+    // Let each block work on block_tiles * wmma elements.
+    int gridX = ceil(((float) n)/(wmma_n * block_tiles_n));
+    int gridY = ceil( ((float) m)/(wmma_m * block_tiles_m));
+    dim3 grid(gridX, gridY, 1);
     // dim3 block(threads_per_block, 1, 1); // 1D block of 256 elements
-    /* Okay so what do we want? Each mm will be done by the entire warp and works warp level.
-    So whatever we want to tile for should be multiple of the warp size.
-    Here we say that the block should compute block_tiles_m x block_tiles_n tensor mm.
-
-    This also works for the grid specification, since we tile so that each warp computes
-    a wmma_m x wmma_n result, and we use block_tiles_m x block_tiles_n warps in the block.
-    */
     dim3 block(block_tiles_n * WARP_SIZE, block_tiles_m, 1);
 
     TimeMeasurement t;
@@ -521,17 +513,17 @@ int main(int argc, char * argv[])
         n_runs, m, n, k, A_accT, B_accT, C_target, C_target, std::string("GPU register tiled")
     );
 
-//    benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_naive, true>(
-//        n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor naive")
-//    );
+   benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_naive, true>(
+       n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor naive")
+   );
 
-    benchmark_kernel<element_type, acc_type, 2, mm_kernel::cublas, true>(
-        n_runs, m, n, k, A, B, C, C_target, std::string("cublas")
-    );
+    // benchmark_kernel<element_type, acc_type, 2, mm_kernel::cublas, true>(
+    //     n_runs, m, n, k, A, B, C, C_target, std::string("cublas")
+    // );
 
-    benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_optimized, true>(
-            n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor optimized")
-    );
+    // benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_optimized, true>(
+    //         n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor optimized")
+    // );
 
     cudaFree(A.to_gpu());
     cudaFree(B.to_gpu());

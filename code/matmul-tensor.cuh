@@ -282,42 +282,127 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     }
 }
 
-template <class accType, class elmType, int wmma_m, int wmma_n, int wmma_k, int block_tiles_m, int block_tiles_n, int block_tiles_k>
-__global__ void matMulTiledTensorNaive(elmType* A, elmType* B, accType* C, unsigned m, unsigned n, unsigned k) {
-    wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag;
-    wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag;
-    wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag;
+template <class accType,
+			  class elmType,
+			  int wmma_m,
+			  int wmma_n,
+			  int wmma_k,
+			  int block_tiles_m,
+			  int block_tiles_n,
+			  int block_tiles_k>
+__global__ void matMulTiledTensorNaive(elmType *A,
+									   elmType *B,
+									   accType *C,
+                                       unsigned m,
+									   unsigned n,
+									   unsigned k)
+{
+  wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType,
+                 wmma::row_major>
+      A_frag;
+  wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType,
+                 wmma::row_major>
+      B_frag;
+  wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag;
 
-    // Taken from
-    // https://developer.nvidia.com/blog/programming-tensor-cores-cuda-9/
-    unsigned warp_n = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
-    unsigned warp_m = (blockIdx.y * blockDim.y + threadIdx.y);
-    
-    wmma::fill_fragment(C_frag, (accType)0.0f);
-    // Sequentialize the k dimension
-    for (int i = 0; i < k; i += wmma_k) {        
-        // Recall that we have block_tiles_m warps in the m dimension.
-        // These will be wmma_m rows spaced appart. Now we find the row for each warp.
-        int A_row = warp_m * wmma_m;        
-        int A_col = i; // because A (M x K) and we sequantialize the k dimension
-        int B_row = i; // again we B is (K x N) and we sequentialize the k dimension
-        // Again we spawn block_tiles_n warps for the block in the n dimension.
-        // This finds the starting column for all warps
-        int B_col = warp_n * wmma_n;
-        if (A_row < m && A_col < k && B_row < k && B_col < n) {
-            wmma::load_matrix_sync(A_frag, &A[A_row * k + A_col], k);
-            wmma::load_matrix_sync(B_frag, &B[B_row * n + B_col], n);
-            wmma::mma_sync(C_frag, A_frag, B_frag, C_frag);
-        }
+  unsigned warp_n = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
+  unsigned warp_m = (blockIdx.y * blockDim.y + threadIdx.y);
+  // TODO: Add padding
+  unsigned shared_k = wmma_k * block_tiles_k;
+  __shared__ elmType Ashared[wmma_m * block_tiles_m][wmma_k * block_tiles_k];
+  __shared__ elmType Bshared[wmma_k * block_tiles_k][wmma_n * block_tiles_n];
 
-    }
-    int C_row = warp_m * wmma_m;
-    int C_col = warp_n * wmma_n;
-    
-    if (C_row < m && C_col < n) {
-        wmma::store_matrix_sync(&C[C_row * n + C_col], C_frag, n, wmma::mem_row_major);
-    }    
+  wmma::fill_fragment(C_frag, (accType)0.0f);
+
+ 
+  
+  for (int global_k = 0; global_k < k; global_k += wmma_k * block_tiles_k)
+  {
+	  // Collective Copy START
+	  ////////////////////////
+	  // Copy A to shared
+	  // We have block_tiles_m warps in the Y direction. Each needs to copy wmma_m rows	  	  
+	  for(int i = 0; i < wmma_m; i++)
+	  {	  		  
+		  unsigned local_m = threadIdx.y * wmma_m;
+		  unsigned global_m = (blockDim.y * blockIdx.y + local_m) * k;
+		  // Need to copy a row of block_tiles_k * wmma_k elements.
+		  // Then we look at the number of warps required to do this.
+		  unsigned copies_per_thread_k = (block_tiles_k * wmma_k + warpSize) / warpSize;
+		  for (int kk = 0; kk < copies_per_thread_k; kk++)
+		  {
+			  unsigned local_k = kk * warpSize + threadIdx.x;
+			  // In the case where we round up too much
+			  if (local_k < block_tiles_k * wmma_k) {
+				  
+				  elmType toShared;
+				  if (global_k + local_k >= k)
+				  {
+					  toShared = elmType();
+				  }
+				  else
+				  {
+					  toShared = A[global_m + global_k + local_k];
+				  }
+			  }			  
+			  
+		  }
+		  
+	  }
+
+	  __syncthreads();
+	  //////////////////////
+	  // Collective Copy END
+	  
+  	  for (int block_k = 0; block_k < block_tiles_k; block_k++)
+	  {		  
+		  // int A_row = threadIdx.y * wmma_m;
+		  // int A_col = block_k;
+		  int A_row = warp_m * wmma_m;
+		  int A_col = global_k + block_k * wmma_k;
+		  int B_row = global_k + block_k * wmma_k;
+		  int B_col = warp_n * wmma_n;
+		  if (B_row < k && B_col < n) {
+			  wmma::load_matrix_sync(A_frag, &A[A_row * k + A_col], k);
+			  wmma::load_matrix_sync(B_frag, &B[B_row * n + B_col], n);
+			  wmma::mma_sync(C_frag, A_frag, B_frag, C_frag);
+		  }
+	  }
+	  int C_row = warp_m * wmma_m;
+	  int C_col = warp_n * wmma_n;
+
+	  if (C_row < m && C_col < n) {
+		  wmma::store_matrix_sync(&C[C_row * n + C_col], C_frag, n,
+								  wmma::mem_row_major);
+	  }
+	  __syncthreads();
+	  
+  }
+	
+  // Sequentialize the k dimension
+  // for (int i = 0; i < k; i += wmma_k) {
+  //   // Recall that we have block_tiles_m warps in the m dimension.
+  //   // These will be wmma_m rows spaced appart. Now we find the row for each
+  //   // warp.
+  //   int A_row = warp_m * wmma_m;
+  //   int A_col = i; // because A (M x K) and we sequantialize the k dimension
+  //   int B_row = i; // again we B is (K x N) and we sequentialize the k dimension
+  //   // Again we spawn block_tiles_n warps for the block in the n dimension.
+  //   // This finds the starting column for all warps
+  //   int B_col = warp_n * wmma_n;
+  //   if (A_row < m && A_col < k && B_row < k && B_col < n) {
+  //     wmma::load_matrix_sync(A_frag, &A[A_row * k + A_col], k);
+  //     wmma::load_matrix_sync(B_frag, &B[B_row * n + B_col], n);
+  //     wmma::mma_sync(C_frag, A_frag, B_frag, C_frag);
+  //   }
+  // }
+  // int C_row = warp_m * wmma_m;
+  // int C_col = warp_n * wmma_n;
+
+  // if (C_row < m && C_col < n) {
+  //   wmma::store_matrix_sync(&C[C_row * n + C_col], C_frag, n,
+  //                           wmma::mem_row_major);
+  // }  
 }
-
 
 #endif //CODE_MATMUL_TENSOR_CUH
