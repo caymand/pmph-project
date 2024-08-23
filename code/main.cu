@@ -147,7 +147,7 @@ unsigned benchmark_naive_tensor_mmm(
         int n,
         int k)
 {
-    constexpr int block_tiles_m = 8;
+    constexpr int block_tiles_m = 4;
     constexpr int block_tiles_n = 4;
     constexpr int block_tiles_k = 2;
     constexpr int wmma_n = 16;
@@ -159,7 +159,7 @@ unsigned benchmark_naive_tensor_mmm(
     int gridX = ceil(((float) n)/(wmma_n * block_tiles_n));
     int gridY = ceil( ((float) m)/(wmma_m * block_tiles_m));
     dim3 grid(gridX, gridY, 1);
-    // dim3 block(threads_per_block, 1, 1); // 1D block of 256 elements
+    // TODO: Should not be warp size
     dim3 block(block_tiles_n * WARP_SIZE, block_tiles_m, 1);
 
     TimeMeasurement t;
