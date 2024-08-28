@@ -89,8 +89,16 @@ long int benchmark_optimized_tensor_mmm(
     // Assumes num_warps >= block_tiles_m * block_tiles_n, i.e. all block tiles are handled by a warp
     assert(threads_per_block / WARP_SIZE >= block_tiles_m * block_tiles_n);
 
-    int dimx = ceil(((float) n)/(wmma_n * warp_tiles_n * block_tiles_n));
-    int dimy = ceil(((float) m)/(wmma_m * warp_tiles_m * block_tiles_m));
+    printf("    Using wmma %d x %d x %d\n", wmma_m, wmma_n, wmma_k);
+    printf("    Using warp tiles %d x %d x %d\n", warp_tiles_m, warp_tiles_n, warp_tiles_k);
+    printf("    Using block tiles %d x %d x %d\n", block_tiles_m, block_tiles_n, block_tiles_k);
+
+    constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
+    constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
+    constexpr unsigned int shared_k = wmma_k * warp_tiles_k * block_tiles_k;
+
+    int dimx = ceil(((float) n)/(shared_n));
+    int dimy = ceil(((float) m)/(shared_m));
 
     dim3 grid(dimx, dimy, 1);
     dim3 block(threads_per_block, 1, 1);
@@ -103,10 +111,6 @@ long int benchmark_optimized_tensor_mmm(
     cudaDeviceGetAttribute(&max_shared_memory, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0);
 
     constexpr unsigned int num_stages = NUM_STAGES;
-
-    constexpr unsigned int shared_m = wmma_m * warp_tiles_m * block_tiles_m;
-    constexpr unsigned int shared_n = wmma_n * warp_tiles_n * block_tiles_n;
-    constexpr unsigned int shared_k = wmma_k * warp_tiles_k * block_tiles_k;
 
     constexpr unsigned int shared_memory_used_A = shared_m * (shared_k + SHARED_PADDING) * sizeof(elmT) * num_stages;
     constexpr unsigned int shared_memory_used_B = shared_k * (shared_n + SHARED_PADDING) * sizeof(elmT) * num_stages;
