@@ -58,7 +58,7 @@ long int benchmark_optimized_tensor_mmm(
     constexpr int frags_m = 2;
 #endif
 #ifdef FRAGS_N
-    constexpr int frags_n = FRAGS_M;
+    constexpr int frags_n = FRAGS_N;
 #else
     constexpr int frags_n = 2;
 #endif
