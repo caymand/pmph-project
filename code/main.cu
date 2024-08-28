@@ -126,7 +126,6 @@ long int benchmark_optimized_tensor_mmm(
 
     t.start();
     for (int i = 0; i < n_runs; i++) {
-//        TODO: fix requested amount of shared memory
         kernel<<<grid, block, shared_memory_used>>>(
             A_device, B_device, C_device, m, n, k
         );
