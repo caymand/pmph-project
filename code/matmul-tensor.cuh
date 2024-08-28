@@ -94,6 +94,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     constexpr unsigned int B_shared_n_true = shared_n + SHARED_PADDING;
     auto B_shared = A_shared + num_stages * shared_m * A_shared_k_true;
 
+    auto zero_elm = LOAD_TYPE();
+
     cg::thread_block block = cg::this_thread_block();
     // Allocate shared storage for a cuda::pipeline:
     __shared__ cuda::pipeline_shared_state<
@@ -143,13 +145,11 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
                 if (tile_m_index < shared_m && tile_k_index < (shared_k / elms_per_load))
                 {
-//                    reinterpret_cast<LOAD_TYPE *>(A_shared)[load_buffer * shared_m * (A_shared_k_true / elms_per_load) + tile_m_index * (A_shared_k_true / elms_per_load) + tile_k_index] =
-//                        A_m_index < m && A_k_index < k / elms_per_load ? reinterpret_cast<LOAD_TYPE *>(A)[A_m_index * (k / elms_per_load) + A_k_index] : LOAD_TYPE();
-//                    TODO: merge all copies of each thread into one?
+                    auto load_dest = &reinterpret_cast<LOAD_TYPE *>(A_shared)[load_buffer * shared_m * (A_shared_k_true / elms_per_load) + tile_m_index * (A_shared_k_true / elms_per_load) + tile_k_index];
                     if (A_m_index < m && A_k_index < k / elms_per_load) {
-                        cuda::memcpy_async(&reinterpret_cast<LOAD_TYPE *>(A_shared)[load_buffer * shared_m * (A_shared_k_true / elms_per_load) + tile_m_index * (A_shared_k_true / elms_per_load) + tile_k_index], &reinterpret_cast<LOAD_TYPE *>(A)[A_m_index * (k / elms_per_load) + A_k_index], sizeof(LOAD_TYPE), pipeline);
+                        cuda::memcpy_async(load_dest, &reinterpret_cast<LOAD_TYPE *>(A)[A_m_index * (k / elms_per_load) + A_k_index], sizeof(LOAD_TYPE), pipeline);
                     } else {
-                        reinterpret_cast<LOAD_TYPE *>(A_shared)[load_buffer * shared_m * (A_shared_k_true / elms_per_load) + tile_m_index * (A_shared_k_true / elms_per_load) + tile_k_index] = LOAD_TYPE();
+                        cuda::memcpy_async(load_dest, &zero_elm, sizeof(LOAD_TYPE), pipeline);
                     }
                 }
             }
@@ -167,14 +167,12 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
                 if (tile_k_index < shared_k && tile_n_index < shared_n / elms_per_load)
                 {
-//                    reinterpret_cast<LOAD_TYPE *>(B_shared)[load_buffer * shared_k * (B_shared_n_true / elms_per_load) + tile_k_index * (B_shared_n_true / elms_per_load) + tile_n_index] =
-//                            B_k_index < k && B_n_index < n / elms_per_load ? reinterpret_cast<LOAD_TYPE *>(B)[B_k_index * (n / elms_per_load) + B_n_index] : LOAD_TYPE();
+                    auto load_dest = &reinterpret_cast<LOAD_TYPE *>(B_shared)[load_buffer * shared_k * (B_shared_n_true / elms_per_load) + tile_k_index * (B_shared_n_true / elms_per_load) + tile_n_index];
                     if (B_k_index < k && B_n_index < n / elms_per_load) {
-                        cuda::memcpy_async(&reinterpret_cast<LOAD_TYPE *>(B_shared)[load_buffer * shared_k * (B_shared_n_true / elms_per_load) + tile_k_index * (B_shared_n_true / elms_per_load) + tile_n_index], &reinterpret_cast<LOAD_TYPE *>(B)[B_k_index * (n / elms_per_load) + B_n_index], sizeof(LOAD_TYPE), pipeline);
+                        cuda::memcpy_async(load_dest, &reinterpret_cast<LOAD_TYPE *>(B)[B_k_index * (n / elms_per_load) + B_n_index], sizeof(LOAD_TYPE), pipeline);
                     } else {
-                        reinterpret_cast<LOAD_TYPE *>(B_shared)[load_buffer * shared_k * (B_shared_n_true / elms_per_load) + tile_k_index * (B_shared_n_true / elms_per_load) + tile_n_index] = LOAD_TYPE();
+                        cuda::memcpy_async(load_dest, &zero_elm, sizeof(LOAD_TYPE), pipeline);
                     }
-
                 }
             }
             pipeline.producer_commit();
