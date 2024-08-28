@@ -15,7 +15,9 @@
 #define MAX_THREADS_PER_BLOCK 1024
 #define MAX_REGISTERS_PER_BLOCK 65536
 
+#ifndef SHARED_PADDING
 #define SHARED_PADDING 8
+#endif
 
 enum mm_kernel {
     register_tiled,

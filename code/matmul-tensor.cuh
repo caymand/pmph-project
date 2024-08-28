@@ -10,7 +10,10 @@
 //#define CACHE_C
 
 #define WARP_SIZE 32
+
+#ifndef SHARED_PADDING
 #define SHARED_PADDING 8
+#endif
 
 #ifndef LOAD_TYPE
 #define LOAD_TYPE double2
