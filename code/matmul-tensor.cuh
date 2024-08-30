@@ -42,6 +42,41 @@ namespace cg = cooperative_groups;
 #define DIV_UP(a, b) (((a) + (b) - 1) / (b))
 
 
+// TODO: avoid reinterpret_cast<uint32_t *> for below functions
+
+// TODO: account for different elm and acc types
+// TODO: array or arguments? check types
+//__forceinline__ __device__ void ldmatrix_x2_trans(half2 r0, half2 r1, void * p) {
+//    asm volatile("ldmatrix.sync.aligned.shape.x2.m8n8.shared.b16 {%0, %1}, [%2];\n" : "=r"(r0), "=r"(r1) : "r"(p));
+//}
+__forceinline__ __device__ void ldmatrix_x2_trans(uint32_t r[2], void * p) {
+    auto smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(p));
+    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0, %1}, [%2];\n" : "=r"(r[0]), "=r"(r[1]) : "r"(smem_ptr));
+}
+
+__forceinline__ __device__ void ldmatrix_x2(uint32_t r[2], void * p) {
+    auto smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(p));
+    asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [%2];\n" : "=r"(r[0]), "=r"(r[1]) : "r"(smem_ptr));
+}
+
+//__forceinline__ __device__ void ldmatrix_x4(half2 r0, half2 r1, half2 r2, half2 r3, void * p) {
+//    asm volatile("ldmatrix.sync.aligned.shape.x4.m8n8.shared.b16 {%0, %1}, [%2];\n" : "=r"(r0), "=r"(r1), "=r"(r2), "=r"(r3) : "r"(p));
+//}
+__forceinline__ __device__ void ldmatrix_x4(uint32_t r[4], void * p) {
+    auto smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(p));
+    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];\n" : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(smem_ptr));
+}
+
+// TODO: check row col
+//__forceinline__ __device__ void mma_m16n8k16(float d0, float d1, float d2, float d3, half2 a0, half2 a1, half2 a2, half2 a3, half2 b0, half2 b1, float c0, float c1, float c2, float c3) {
+//    asm volatile("mma.sync.aligned.m16n8k16.row.row.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d0), "=r"(d1), "=r"(d2), "=r"(d3) : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(c0), "r"(c1), "r"(c2), "r"(c3));
+//}
+// Check if this is better:
+__forceinline__ __device__ void mma_m16n8k16(uint32_t d[4], uint32_t a[4], uint32_t b[2], uint32_t c[4]) {
+    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
+}
+
+
 #ifndef THREADS_PER_BLOCK
 #ifdef BLOCK_TILES_M
 #ifdef BLOCK_TILES_N
@@ -76,6 +111,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     unsigned int block_n_global_offset = blockIdx.x * shared_n;
 
     unsigned int warpID = threadIdx.x / warpSize;
+    unsigned int laneID = threadIdx.x % warpSize;
 
     // Assumes num_warps >= block_tiles_m * block_tiles_n
     unsigned int warp_m_index = warpID / block_tiles_n;
@@ -107,7 +143,10 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     auto pipeline = cuda::make_pipeline(block, &shared_state);
 
     // TODO: load and store C_frags?
-    wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[frags_m * warp_tiles_m][frags_n * warp_tiles_n];
+    //    wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[frags_m * warp_tiles_m][frags_n * warp_tiles_n];
+
+    // TODO: account for different elm and acc types
+    float C_frag[frags_m * warp_tiles_m][frags_n * warp_tiles_n][4];
 
     // Initialize C_frag to zero
     #ifdef UNROLL
@@ -120,7 +159,11 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         #endif
         for (int warp_n_offset_i = 0; warp_n_offset_i < frags_n * warp_tiles_n; warp_n_offset_i++)
         {
-            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], accType());
+//            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], accType());
+
+            for (int i = 0; i < 4; i++) {
+                C_frag[warp_m_offset_i][warp_n_offset_i][i] = float();
+            }
         }
     }
 
@@ -200,8 +243,11 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             {
                 pipeline.consumer_wait();
 
-                wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[frags_m][frags_k];
-                wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[frags_k][frags_n];
+//                wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[frags_m][frags_k];
+//                wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[frags_k][frags_n];
+
+                half2 A_frag[frags_m][frags_k][4];
+                half2 B_frag[frags_k][frags_n][2];
 
                 #ifdef UNROLL
                 #pragma unroll
@@ -233,11 +279,20 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                             #endif
                             for (int frag_m_offset_i = 0; frag_m_offset_i < frags_m; frag_m_offset_i++)
                             {
-                                wmma::load_matrix_sync(A_frag[frag_m_offset_i][frag_k_offset_i],
-                                                       &A_shared[compute_buffer * shared_m * A_shared_k_true +
-                                                                 (warp_m_shared_offset + warp_m_offset + frag_m_offset_i * wmma_m) *
-                                                                 A_shared_k_true + local_k_offset +
-                                                                 frag_k_offset_i * wmma_k], A_shared_k_true);
+//                                wmma::load_matrix_sync(A_frag[frag_m_offset_i][frag_k_offset_i],
+//                                                       &A_shared[compute_buffer * shared_m * A_shared_k_true +
+//                                                                 (warp_m_shared_offset + warp_m_offset + frag_m_offset_i * wmma_m) *
+//                                                                 A_shared_k_true + local_k_offset +
+//                                                                 frag_k_offset_i * wmma_k], A_shared_k_true);
+                                auto matrix_ptr = &A_shared[compute_buffer * shared_m * A_shared_k_true +
+                                                            (warp_m_shared_offset + warp_m_offset + frag_m_offset_i * wmma_m) *
+                                                            A_shared_k_true + local_k_offset +
+                                                            frag_k_offset_i * wmma_k];
+                                auto row_i = laneID;
+                                auto row_k_i = row_i % 2;
+                                auto row_m_i = row_i / 2;
+
+                                ldmatrix_x4(reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]), matrix_ptr + row_m_i * A_shared_k_true + row_k_i * 8);
                             }
                         }
 
@@ -261,11 +316,33 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                 #endif
                                 for (int frag_n_offset_i = 0; frag_n_offset_i < frags_n; frag_n_offset_i++)
                                 {
-                                    wmma::load_matrix_sync(B_frag[frag_k_offset_i][frag_n_offset_i],
-                                                           &B_shared[compute_buffer * shared_k * B_shared_n_true +
-                                                                     (local_k_offset + frag_k_offset_i * wmma_k) *
-                                                                     B_shared_n_true + warp_n_shared_offset + warp_n_offset +
-                                                                     frag_n_offset_i * wmma_n], B_shared_n_true);
+//                                    wmma::load_matrix_sync(B_frag[frag_k_offset_i][frag_n_offset_i],
+//                                                           &B_shared[compute_buffer * shared_k * B_shared_n_true +
+//                                                                     (local_k_offset + frag_k_offset_i * wmma_k) *
+//                                                                     B_shared_n_true + warp_n_shared_offset + warp_n_offset +
+//                                                                     frag_n_offset_i * wmma_n], B_shared_n_true);
+
+                                    auto matrix_ptr = &B_shared[compute_buffer * shared_k * B_shared_n_true +
+                                                                (local_k_offset + frag_k_offset_i * wmma_k) *
+                                                                B_shared_n_true + warp_n_shared_offset + warp_n_offset +
+                                                                frag_n_offset_i * wmma_n];
+
+//                                    Only one row in n dimension
+                                    ldmatrix_x2(
+                                            reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]),
+                                            matrix_ptr + laneID * B_shared_n_true);
+
+// TODO: fix this
+////                                    TODO: transpose on load to shared instead?
+//                                    // Load transposed
+//                                    unsigned int k_index = local_k_offset + frag_k_offset_i * wmma_k;
+//                                    unsigned int n_index = warp_n_shared_offset + warp_n_offset + frag_n_offset_i * wmma_n + laneID * B_shared_n_true;
+//                                    auto matrix_ptr = &B_shared[compute_buffer * shared_k * B_shared_n_true
+//                                                                + n_index * shared_k
+//                                                                + k_index];
+//
+////                                    TODO: use trans or not here?
+//                                    ldmatrix_x2_trans(reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]), matrix_ptr);
                                 }
                             }
 
@@ -291,9 +368,14 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                         // Serpentine off
                                         int frag_n_offset_i_serpentine = frag_n_offset_i;
                                         #endif
-                                        wmma::mma_sync(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine],
-                                                       A_frag[frag_m_offset_i][frag_k_offset_i], B_frag[frag_k_offset_i][frag_n_offset_i_serpentine],
-                                                       C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine]);
+//                                        wmma::mma_sync(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine],
+//                                                       A_frag[frag_m_offset_i][frag_k_offset_i], B_frag[frag_k_offset_i][frag_n_offset_i_serpentine],
+//                                                       C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine]);
+
+                                        mma_m16n8k16(reinterpret_cast<uint32_t *>(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine]),
+                                                     reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]),
+                                                     reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i_serpentine]),
+                                                     reinterpret_cast<uint32_t *>(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine]));
                                     }
                                 }
                             }
@@ -331,10 +413,27 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                     #endif
                     for (int frag_n_offset_i = 0; frag_n_offset_i < frags_n; frag_n_offset_i++)
                     {
-                        int m_index = warp_m_global_offset + warp_m_offset + frag_m_offset_i * wmma_m;
-                        int n_index = warp_n_global_offset + warp_n_offset + frag_n_offset_i * wmma_n;
-                        wmma::store_matrix_sync(&C[m_index * n + n_index], C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i], n,
-                                                wmma::mem_row_major);
+                        unsigned int m_offset = warp_m_global_offset + warp_m_offset + frag_m_offset_i * wmma_m;
+                        unsigned int n_offset = warp_n_global_offset + warp_n_offset + frag_n_offset_i * wmma_n;
+//                        wmma::store_matrix_sync(&C[m_index * n + n_index], C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i], n,
+//                                                wmma::mem_row_major);
+
+//                        TODO: vectorize stores
+                        for (unsigned int i = 0; i < 4; i++)
+                        {
+                            unsigned int groupID = laneID / 4;
+                            unsigned int threadID_in_group = laneID % 4;
+                            unsigned int row = groupID + 8 * (i / 2);
+                            unsigned int col = threadID_in_group * 2 + (i & 1);
+
+                            unsigned int m_index = m_offset + row;
+                            unsigned int n_index = n_offset + col;
+
+                            if (m_index < m && n_index < n)
+                            {
+                                C[m_index * n + n_index] = C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i][i];
+                            }
+                        }
                     }
                 }
             }
