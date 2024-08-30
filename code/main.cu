@@ -79,6 +79,11 @@ long int benchmark_optimized_tensor_mmm(
 #else
     constexpr int warp_tiles_n = 2;
 #endif
+#ifdef WARP_TILES_K
+    constexpr int warp_tiles_k = WARP_TILES_K;
+#else
+    constexpr int warp_tiles_k = 2;
+#endif
 #ifdef BLOCK_TILES_M
     constexpr int block_tiles_m = BLOCK_TILES_M;
 #else
@@ -89,11 +94,6 @@ long int benchmark_optimized_tensor_mmm(
 #else
     constexpr int block_tiles_n = 2;
 #endif
-#ifdef BLOCK_TILES_K
-    constexpr int block_tiles_k = BLOCK_TILES_K;
-#else
-    constexpr int block_tiles_k = 2;
-#endif
 
     constexpr unsigned int threads_per_block = block_tiles_m * block_tiles_n * WARP_SIZE;
     printf("    Threads used: %d/%d\n", threads_per_block, MAX_THREADS_PER_BLOCK);
@@ -103,12 +103,12 @@ long int benchmark_optimized_tensor_mmm(
 
     printf("    Using wmma %d x %d x %d\n", wmma_m, wmma_n, wmma_k);
     printf("    Using frags %d x %d x %d\n", frags_m, frags_n, frags_k);
-    printf("    Using warp tiles %d x %d\n", warp_tiles_m, warp_tiles_n);
-    printf("    Using block tiles %d x %d x %d\n", block_tiles_m, block_tiles_n, block_tiles_k);
+    printf("    Using warp tiles %d x %d x %d\n", warp_tiles_m, warp_tiles_n, warp_tiles_k);
+    printf("    Using block tiles %d x %d\n", block_tiles_m, block_tiles_n);
 
     constexpr unsigned int shared_m = wmma_m * frags_m * warp_tiles_m * block_tiles_m;
     constexpr unsigned int shared_n = wmma_n * frags_n * warp_tiles_n * block_tiles_n;
-    constexpr unsigned int shared_k = wmma_k * frags_k * block_tiles_k;
+    constexpr unsigned int shared_k = wmma_k * frags_k * warp_tiles_k;
 
     int dimx = ceil(((float) n)/(shared_n));
     int dimy = ceil(((float) m)/(shared_m));
@@ -133,7 +133,7 @@ long int benchmark_optimized_tensor_mmm(
     printf("    Shared memory used A: %d/%d bytes (%.0f%%)\n", shared_memory_used_A, max_shared_memory, (float) shared_memory_used_A / max_shared_memory * 100);
     printf("    Shared memory used B: %d/%d bytes (%.0f%%)\n", shared_memory_used_B, max_shared_memory, (float) shared_memory_used_B / max_shared_memory * 100);
 
-    auto kernel = matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, frags_m, frags_n, frags_k, warp_tiles_m, warp_tiles_n, block_tiles_m, block_tiles_n, block_tiles_k, threads_per_block, num_stages>;
+    auto kernel = matMulTiledTensor<elmT, elmAccT, wmma_m, wmma_n, wmma_k, frags_m, frags_n, frags_k, warp_tiles_m, warp_tiles_n, warp_tiles_k, block_tiles_m, block_tiles_n, threads_per_block, num_stages>;
 
     cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shared_memory_used);
 //    cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, 100);

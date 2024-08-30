@@ -52,7 +52,7 @@ namespace cg = cooperative_groups;
 #endif
 #endif
 
-template <class elmType, class accType, unsigned int wmma_m, unsigned int wmma_n, unsigned int wmma_k, unsigned int frags_m, unsigned int frags_n, unsigned int frags_k, unsigned int warp_tiles_m, unsigned int warp_tiles_n, unsigned int block_tiles_m, unsigned int block_tiles_n, unsigned int block_tiles_k, unsigned int threads_per_block, unsigned int num_stages>
+template <class elmType, class accType, unsigned int wmma_m, unsigned int wmma_n, unsigned int wmma_k, unsigned int frags_m, unsigned int frags_n, unsigned int frags_k, unsigned int warp_tiles_m, unsigned int warp_tiles_n, unsigned int warp_tiles_k, unsigned int block_tiles_m, unsigned int block_tiles_n, unsigned int threads_per_block, unsigned int num_stages>
 __global__ void
 #ifdef BLOCKS_PER_SM
 __launch_bounds__(THREADS_PER_BLOCK, BLOCKS_PER_SM)
@@ -64,7 +64,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
     constexpr unsigned int shared_m = wmma_m * frags_m * warp_tiles_m * block_tiles_m;
     constexpr unsigned int shared_n = wmma_n * frags_n * warp_tiles_n * block_tiles_n;
-    constexpr unsigned int shared_k = wmma_k * frags_k * block_tiles_k;
+    constexpr unsigned int shared_k = wmma_k * frags_k * warp_tiles_k;
 
     constexpr int copies_per_thread_A = (shared_m * shared_k + threads_per_block) / threads_per_block;
     constexpr int copies_per_thread_B = (shared_k * shared_n + threads_per_block) / threads_per_block;
@@ -193,7 +193,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 #ifdef NOUNROLL
                 #pragma unroll 1
                 #endif
-                for (int local_k_offset_i = 0; local_k_offset_i < block_tiles_k; local_k_offset_i++)
+                for (int local_k_offset_i = 0; local_k_offset_i < warp_tiles_k; local_k_offset_i++)
                 {
                     int local_k_offset = local_k_offset_i * frags_k * wmma_k;
 
