@@ -77,6 +77,12 @@ __forceinline__ __device__ void mma_m16n8k16(uint32_t d[4], uint32_t a[4], uint3
 }
 
 
+__forceinline__ __device__ void movmatrix(uint32_t * d, uint32_t * a) {
+    asm volatile("movmatrix.sync.aligned.m8n8.trans.b16 %0, %1;\n" : "=r"(d[0]): "r"(a[0]));
+}
+
+
+
 #ifndef THREADS_PER_BLOCK
 #ifdef BLOCK_TILES_M
 #ifdef BLOCK_TILES_N
@@ -327,10 +333,30 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                                                 B_shared_n_true + warp_n_shared_offset + warp_n_offset +
                                                                 frag_n_offset_i * wmma_n];
 
-//                                    Only one row in n dimension
-                                    ldmatrix_x2(
-                                            reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]),
-                                            matrix_ptr + laneID * B_shared_n_true);
+                                    // Only one row in n dimension
+//                                    ldmatrix_x2(
+//                                            reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]),
+//                                            matrix_ptr + laneID * B_shared_n_true);
+
+
+//                                    TODO: maybe best to avoid?
+                                    // Just transpose
+//                                    TODO: check if we can just pass same registers twice in transpose
+                                    half2 B_frag_temp[2];
+
+                                    // TODO: just use laneID as above?
+//                                    auto row_i = laneID;
+//                                    auto row_k_i = row_i % 2;
+//                                    auto row_n_i = row_i / 2;
+
+                                    ldmatrix_x2(reinterpret_cast<uint32_t *>(B_frag_temp),
+                                                matrix_ptr + laneID * B_shared_n_true);
+
+                                    movmatrix(reinterpret_cast<uint32_t *>(&B_frag[frag_k_offset_i][frag_n_offset_i][0]), reinterpret_cast<uint32_t *>(&B_frag_temp[0]));
+                                    movmatrix(reinterpret_cast<uint32_t *>(&B_frag[frag_k_offset_i][frag_n_offset_i][1]), reinterpret_cast<uint32_t *>(&B_frag_temp[1]));
+
+//                                    B_frag[frag_k_offset_i][frag_n_offset_i][0] = B_frag_temp[0];
+//                                    B_frag[frag_k_offset_i][frag_n_offset_i][1] = B_frag_temp[1];
 
 // TODO: fix this
 ////                                    TODO: transpose on load to shared instead?
@@ -423,6 +449,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         {
                             unsigned int groupID = laneID / 4;
                             unsigned int threadID_in_group = laneID % 4;
+
                             unsigned int row = groupID + 8 * (i / 2);
                             unsigned int col = threadID_in_group * 2 + (i & 1);
 
