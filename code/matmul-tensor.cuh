@@ -45,41 +45,39 @@ namespace cg = cooperative_groups;
 // TODO: avoid reinterpret_cast<uint32_t *> for below functions
 
 // TODO: account for different elm and acc types
-// TODO: array or arguments? check types
-//__forceinline__ __device__ void ldmatrix_x2_trans(half2 r0, half2 r1, void * p) {
-//    asm volatile("ldmatrix.sync.aligned.shape.x2.m8n8.shared.b16 {%0, %1}, [%2];\n" : "=r"(r0), "=r"(r1) : "r"(p));
-//}
-__forceinline__ __device__ void ldmatrix_x2_trans(uint32_t r[2], void * p) {
-    auto smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(p));
-    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0, %1}, [%2];\n" : "=r"(r[0]), "=r"(r[1]) : "r"(smem_ptr));
-}
+// TODO: check types
 
 __forceinline__ __device__ void ldmatrix_x2(uint32_t r[2], void * p) {
     auto smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(p));
     asm volatile("ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [%2];\n" : "=r"(r[0]), "=r"(r[1]) : "r"(smem_ptr));
 }
 
-//__forceinline__ __device__ void ldmatrix_x4(half2 r0, half2 r1, half2 r2, half2 r3, void * p) {
-//    asm volatile("ldmatrix.sync.aligned.shape.x4.m8n8.shared.b16 {%0, %1}, [%2];\n" : "=r"(r0), "=r"(r1), "=r"(r2), "=r"(r3) : "r"(p));
-//}
+__forceinline__ __device__ void ldmatrix_x2_trans(uint32_t r[2], void * p) {
+    auto smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(p));
+    asm volatile("ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0, %1}, [%2];\n" : "=r"(r[0]), "=r"(r[1]) : "r"(smem_ptr));
+}
+
 __forceinline__ __device__ void ldmatrix_x4(uint32_t r[4], void * p) {
     auto smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(p));
     asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];\n" : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(smem_ptr));
 }
 
-// TODO: check row col
-//__forceinline__ __device__ void mma_m16n8k16(float d0, float d1, float d2, float d3, half2 a0, half2 a1, half2 a2, half2 a3, half2 b0, half2 b1, float c0, float c1, float c2, float c3) {
-//    asm volatile("mma.sync.aligned.m16n8k16.row.row.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d0), "=r"(d1), "=r"(d2), "=r"(d3) : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(c0), "r"(c1), "r"(c2), "r"(c3));
-//}
-// Check if this is better:
+__forceinline__ __device__ void ldmatrix_x4_trans(uint32_t r[4], void * p) {
+    auto smem_ptr = static_cast<uint32_t>(__cvta_generic_to_shared(p));
+    asm volatile("ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 {%0, %1, %2, %3}, [%4];\n" : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(smem_ptr));
+}
+
 __forceinline__ __device__ void mma_m16n8k16(uint32_t d[4], uint32_t a[4], uint32_t b[2], uint32_t c[4]) {
     asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
 }
 
+// TODO: use something like this maybe 2D b and c, else just double dimensions?
+//__forceinline__ __device__ void mma_m16n16k16(uint32_t d[4], uint32_t a[4], uint32_t b[2], uint32_t c[4]) {
+//    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
+//    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
+//}
 
-__forceinline__ __device__ void movmatrix(uint32_t * d, uint32_t * a) {
-    asm volatile("movmatrix.sync.aligned.m8n8.trans.b16 %0, %1;\n" : "=r"(d[0]): "r"(a[0]));
-}
+
 
 
 
@@ -149,8 +147,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     auto pipeline = cuda::make_pipeline(block, &shared_state);
 
     // TODO: account for different elm and acc types
-    // TODO: Use 2 x 16x8x16 as basic building block and always use ldmatrix.x4?
-    float C_frag[frags_m * warp_tiles_m][frags_n * warp_tiles_n][4];
+    // Using 2 x 16x8x16 as basic building block
+    float C_frag[frags_m * warp_tiles_m][frags_n * warp_tiles_n][2][4];
 
     // Initialize C_frag to zero
     #ifdef UNROLL
@@ -163,8 +161,18 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         #endif
         for (int warp_n_offset_i = 0; warp_n_offset_i < frags_n * warp_tiles_n; warp_n_offset_i++)
         {
-            for (int i = 0; i < 4; i++) {
-                C_frag[warp_m_offset_i][warp_n_offset_i][i] = float();
+            #ifdef UNROLL
+            #pragma unroll
+            #endif
+            for (int j = 0; j < 2; j++)
+            {
+                #ifdef UNROLL
+                #pragma unroll
+                #endif
+                for (int i = 0; i < 4; i++)
+                {
+                    C_frag[warp_m_offset_i][warp_n_offset_i][j][i] = float();
+                }
             }
         }
     }
@@ -246,7 +254,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 pipeline.consumer_wait();
 
                 half2 A_frag[frags_m][frags_k][4];
-                half2 B_frag[frags_k][frags_n][2];
+                half2 B_frag[frags_k][frags_n][2][2];
 
                 #ifdef NOUNROLL
                 #pragma unroll 1
@@ -318,10 +326,14 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                                                 B_shared_n_true + warp_n_shared_offset + warp_n_offset +
                                                                 frag_n_offset_i * wmma_n];
 
+                                    auto row_i = laneID;
+                                    auto row_n_i = row_i / 16;
+                                    auto row_k_i = row_i % 16;
+
                                     // Only one row in n dimension
-                                    ldmatrix_x2_trans(
+                                    ldmatrix_x4_trans(
                                             reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]),
-                                            matrix_ptr + laneID * B_shared_n_true);
+                                            matrix_ptr + row_k_i * B_shared_n_true + row_n_i * 8);
                                 }
                             }
 
@@ -348,10 +360,15 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                         int frag_n_offset_i_serpentine = frag_n_offset_i;
                                         #endif
 
-                                        mma_m16n8k16(reinterpret_cast<uint32_t *>(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine]),
-                                                     reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]),
-                                                     reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i_serpentine]),
-                                                     reinterpret_cast<uint32_t *>(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine]));
+                                        #ifdef UNROLL
+                                        #pragma unroll
+                                        #endif
+                                        for (int i = 0; i < 2; i++) {
+                                            mma_m16n8k16(reinterpret_cast<uint32_t *>(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine][i]),
+                                                         reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]),
+                                                         reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i_serpentine][i]),
+                                                         reinterpret_cast<uint32_t *>(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine][i]));
+                                        }
                                     }
                                 }
                             }
@@ -392,21 +409,31 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         unsigned int n_offset = warp_n_global_offset + warp_n_offset + frag_n_offset_i * wmma_n;
 
 //                        TODO: vectorize stores, try storing in shared first, then coalesced store to global
+
+// TODO: refactor, rename
+                        #ifdef UNROLL
                         #pragma unroll
-                        for (unsigned int i = 0; i < 4; i++)
+                        #endif
+                        for (unsigned int j = 0; j < 2; j++)
                         {
-                            unsigned int groupID = laneID / 4;
-                            unsigned int threadID_in_group = laneID % 4;
-
-                            unsigned int row = groupID + 8 * (i / 2);
-                            unsigned int col = threadID_in_group * 2 + (i & 1);
-
-                            unsigned int m_index = m_offset + row;
-                            unsigned int n_index = n_offset + col;
-
-                            if (m_index < m && n_index < n)
+                            #ifdef UNROLL
+                            #pragma unroll
+                            #endif
+                            for (unsigned int i = 0; i < 4; i++)
                             {
-                                C[m_index * n + n_index] = C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i][i];
+                                unsigned int groupID = laneID / 4;
+                                unsigned int threadID_in_group = laneID % 4;
+
+                                unsigned int row = groupID + 8 * (i / 2);
+                                unsigned int col = threadID_in_group * 2 + (i & 1);
+
+                                unsigned int m_index = m_offset + row;
+                                unsigned int n_index = n_offset + col + j * 8;
+
+                                if (m_index < m && n_index < n)
+                                {
+                                    C[m_index * n + n_index] = C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i][j][i];
+                                }
                             }
                         }
                     }

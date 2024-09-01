@@ -47,8 +47,7 @@ long int benchmark_optimized_tensor_mmm(
 #ifdef WMMA_N
     constexpr int wmma_n = WMMA_N;
 #else
-//    TODO: change back to 16 if using 2 x 16x8x16 as basic building block
-    constexpr int wmma_n = 8;
+    constexpr int wmma_n = 16;
 #endif
 #ifdef WMMA_K
     constexpr int wmma_k = WMMA_K;
