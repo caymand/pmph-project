@@ -148,10 +148,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     > shared_state;
     auto pipeline = cuda::make_pipeline(block, &shared_state);
 
-    // TODO: load and store C_frags?
-    //    wmma::fragment<wmma::accumulator, wmma_m, wmma_n, wmma_k, accType> C_frag[frags_m * warp_tiles_m][frags_n * warp_tiles_n];
-
     // TODO: account for different elm and acc types
+    // TODO: Use 2 x 16x8x16 as basic building block and always use ldmatrix.x4?
     float C_frag[frags_m * warp_tiles_m][frags_n * warp_tiles_n][4];
 
     // Initialize C_frag to zero
@@ -249,27 +247,26 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             {
                 pipeline.consumer_wait();
 
-//                wmma::fragment<wmma::matrix_a, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> A_frag[frags_m][frags_k];
-//                wmma::fragment<wmma::matrix_b, wmma_m, wmma_n, wmma_k, elmType, wmma::row_major> B_frag[frags_k][frags_n];
-
                 half2 A_frag[frags_m][frags_k][4];
                 half2 B_frag[frags_k][frags_n][2];
 
+                #ifdef NOUNROLL
+                #pragma unroll 1
+                #else
                 #ifdef UNROLL
                 #pragma unroll
                 #endif
-                #ifdef NOUNROLL
-                #pragma unroll 1
                 #endif
                 for (int local_k_offset_i = 0; local_k_offset_i < warp_tiles_k; local_k_offset_i++)
                 {
                     int local_k_offset = local_k_offset_i * frags_k * wmma_k;
 
+                    #ifdef NOUNROLL1
+                    #pragma unroll 1
+                    #else
                     #ifdef UNROLL
                     #pragma unroll
                     #endif
-                    #ifdef NOUNROLL1
-                    #pragma unroll 1
                     #endif
                     for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
                     {
@@ -285,28 +282,24 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                             #endif
                             for (int frag_m_offset_i = 0; frag_m_offset_i < frags_m; frag_m_offset_i++)
                             {
-//                                wmma::load_matrix_sync(A_frag[frag_m_offset_i][frag_k_offset_i],
-//                                                       &A_shared[compute_buffer * shared_m * A_shared_k_true +
-//                                                                 (warp_m_shared_offset + warp_m_offset + frag_m_offset_i * wmma_m) *
-//                                                                 A_shared_k_true + local_k_offset +
-//                                                                 frag_k_offset_i * wmma_k], A_shared_k_true);
                                 auto matrix_ptr = &A_shared[compute_buffer * shared_m * A_shared_k_true +
                                                             (warp_m_shared_offset + warp_m_offset + frag_m_offset_i * wmma_m) *
                                                             A_shared_k_true + local_k_offset +
                                                             frag_k_offset_i * wmma_k];
                                 auto row_i = laneID;
-                                auto row_k_i = row_i % 2;
-                                auto row_m_i = row_i / 2;
+                                auto row_k_i = row_i / 16;
+                                auto row_m_i = row_i % 16;
 
                                 ldmatrix_x4(reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]), matrix_ptr + row_m_i * A_shared_k_true + row_k_i * 8);
                             }
                         }
 
+                        #ifdef NOUNROLL2
+                        #pragma unroll 1
+                        #else
                         #ifdef UNROLL
                         #pragma unroll
                         #endif
-                        #ifdef NOUNROLL2
-                        #pragma unroll 1
                         #endif
                         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
@@ -322,53 +315,15 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                 #endif
                                 for (int frag_n_offset_i = 0; frag_n_offset_i < frags_n; frag_n_offset_i++)
                                 {
-//                                    wmma::load_matrix_sync(B_frag[frag_k_offset_i][frag_n_offset_i],
-//                                                           &B_shared[compute_buffer * shared_k * B_shared_n_true +
-//                                                                     (local_k_offset + frag_k_offset_i * wmma_k) *
-//                                                                     B_shared_n_true + warp_n_shared_offset + warp_n_offset +
-//                                                                     frag_n_offset_i * wmma_n], B_shared_n_true);
-
                                     auto matrix_ptr = &B_shared[compute_buffer * shared_k * B_shared_n_true +
                                                                 (local_k_offset + frag_k_offset_i * wmma_k) *
                                                                 B_shared_n_true + warp_n_shared_offset + warp_n_offset +
                                                                 frag_n_offset_i * wmma_n];
 
                                     // Only one row in n dimension
-//                                    ldmatrix_x2(
-//                                            reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]),
-//                                            matrix_ptr + laneID * B_shared_n_true);
-
-
-//                                    TODO: maybe best to avoid?
-                                    // Just transpose
-//                                    TODO: check if we can just pass same registers twice in transpose
-                                    half2 B_frag_temp[2];
-
-                                    // TODO: just use laneID as above?
-//                                    auto row_i = laneID;
-//                                    auto row_k_i = row_i % 2;
-//                                    auto row_n_i = row_i / 2;
-
-                                    ldmatrix_x2(reinterpret_cast<uint32_t *>(B_frag_temp),
-                                                matrix_ptr + laneID * B_shared_n_true);
-
-                                    movmatrix(reinterpret_cast<uint32_t *>(&B_frag[frag_k_offset_i][frag_n_offset_i][0]), reinterpret_cast<uint32_t *>(&B_frag_temp[0]));
-                                    movmatrix(reinterpret_cast<uint32_t *>(&B_frag[frag_k_offset_i][frag_n_offset_i][1]), reinterpret_cast<uint32_t *>(&B_frag_temp[1]));
-
-//                                    B_frag[frag_k_offset_i][frag_n_offset_i][0] = B_frag_temp[0];
-//                                    B_frag[frag_k_offset_i][frag_n_offset_i][1] = B_frag_temp[1];
-
-// TODO: fix this
-////                                    TODO: transpose on load to shared instead?
-//                                    // Load transposed
-//                                    unsigned int k_index = local_k_offset + frag_k_offset_i * wmma_k;
-//                                    unsigned int n_index = warp_n_shared_offset + warp_n_offset + frag_n_offset_i * wmma_n + laneID * B_shared_n_true;
-//                                    auto matrix_ptr = &B_shared[compute_buffer * shared_k * B_shared_n_true
-//                                                                + n_index * shared_k
-//                                                                + k_index];
-//
-////                                    TODO: use trans or not here?
-//                                    ldmatrix_x2_trans(reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]), matrix_ptr);
+                                    ldmatrix_x2_trans(
+                                            reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]),
+                                            matrix_ptr + laneID * B_shared_n_true);
                                 }
                             }
 
@@ -394,9 +349,6 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                         // Serpentine off
                                         int frag_n_offset_i_serpentine = frag_n_offset_i;
                                         #endif
-//                                        wmma::mma_sync(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine],
-//                                                       A_frag[frag_m_offset_i][frag_k_offset_i], B_frag[frag_k_offset_i][frag_n_offset_i_serpentine],
-//                                                       C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine]);
 
                                         mma_m16n8k16(reinterpret_cast<uint32_t *>(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine]),
                                                      reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]),
@@ -413,7 +365,6 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         }
     }
 
-    // TODO: try storing in shared first, then optimized store to global
     if (warp_m_global_offset < m && warp_n_global_offset < n) {
         #ifdef UNROLL
         #pragma unroll
@@ -441,10 +392,9 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                     {
                         unsigned int m_offset = warp_m_global_offset + warp_m_offset + frag_m_offset_i * wmma_m;
                         unsigned int n_offset = warp_n_global_offset + warp_n_offset + frag_n_offset_i * wmma_n;
-//                        wmma::store_matrix_sync(&C[m_index * n + n_index], C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i], n,
-//                                                wmma::mem_row_major);
 
-//                        TODO: vectorize stores
+//                        TODO: vectorize stores, try storing in shared first, then coalesced store to global
+                        #pragma unroll
                         for (unsigned int i = 0; i < 4; i++)
                         {
                             unsigned int groupID = laneID / 4;
