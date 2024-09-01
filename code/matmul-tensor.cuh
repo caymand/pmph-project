@@ -163,8 +163,6 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         #endif
         for (int warp_n_offset_i = 0; warp_n_offset_i < frags_n * warp_tiles_n; warp_n_offset_i++)
         {
-//            wmma::fill_fragment(C_frag[warp_m_offset_i][warp_n_offset_i], accType());
-
             for (int i = 0; i < 4; i++) {
                 C_frag[warp_m_offset_i][warp_n_offset_i][i] = float();
             }
