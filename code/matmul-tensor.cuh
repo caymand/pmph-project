@@ -408,9 +408,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         unsigned int m_offset = warp_m_global_offset + warp_m_offset + frag_m_offset_i * wmma_m;
                         unsigned int n_offset = warp_n_global_offset + warp_n_offset + frag_n_offset_i * wmma_n;
 
-//                        TODO: vectorize stores, try storing in shared first, then coalesced store to global
-
-// TODO: refactor, rename
+                        // TODO: vectorize stores, try storing in shared first, then coalesced store to global
+                        // TODO: refactor, rename
                         #ifdef UNROLL
                         #pragma unroll
                         #endif
