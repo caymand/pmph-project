@@ -11,12 +11,9 @@
 
 #define WARP_SIZE 32
 
-#ifndef SHARED_PADDING
-#define SHARED_PADDING 8
-#endif
 
 #ifndef LOAD_TYPE
-#define LOAD_TYPE double2
+#define LOAD_TYPE float4
 #endif
 
 #ifndef NUM_STAGES
@@ -107,19 +104,26 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     constexpr unsigned int shared_n = wmma_n * frags_n * warp_tiles_n * block_tiles_n;
     constexpr unsigned int shared_k = wmma_k * frags_k * warp_tiles_k;
 
+//    TODO: handle other cases, account for differennt element sizes
+    // Assumes 64 halfs = 128B in leading dimension of A and B
+    assert(shared_k % 64 == 0 && shared_n % 64 == 0);
+
     constexpr int copies_per_thread_A = DIV_UP(shared_m * shared_k, threads_per_block);
     constexpr int copies_per_thread_B = DIV_UP(shared_k * shared_n, threads_per_block);
     constexpr int elms_per_load = DIV_UP(sizeof(LOAD_TYPE), sizeof(elmType));
 
-    unsigned int block_m_global_offset = blockIdx.y * shared_m;
-    unsigned int block_n_global_offset = blockIdx.x * shared_n;
-
     unsigned int warpID = threadIdx.x / warpSize;
     unsigned int laneID = threadIdx.x % warpSize;
+
+    unsigned int warpQuarter = laneID / 8;
+    unsigned int warpIDInQuarter = laneID % 8;
 
     // Assumes num_warps >= block_tiles_m * block_tiles_n
     unsigned int warp_m_index = warpID / block_tiles_n;
     unsigned int warp_n_index = warpID % block_tiles_n;
+
+    unsigned int block_m_global_offset = blockIdx.y * shared_m;
+    unsigned int block_n_global_offset = blockIdx.x * shared_n;
 
     // TODO: make this last index instead for better memory access?
     unsigned int warp_m_shared_offset = warp_m_index * wmma_m * frags_m * warp_tiles_m;
@@ -128,13 +132,20 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     unsigned int warp_m_global_offset = block_m_global_offset + warp_m_shared_offset;
     unsigned int warp_n_global_offset = block_n_global_offset + warp_n_shared_offset;
 
-    // Pad to avoid bank conflicts
-    constexpr unsigned int A_shared_k_true = shared_k + SHARED_PADDING;
     auto A_shared = reinterpret_cast<elmType *>(dynamic_shared);
+    auto B_shared = A_shared + num_stages * shared_m * shared_k;
 
-    // Pad to avoid bank conflicts
-    constexpr unsigned int B_shared_n_true = shared_n + SHARED_PADDING;
-    auto B_shared = A_shared + num_stages * shared_m * A_shared_k_true;
+    constexpr unsigned int load_tile_width = 8;
+
+    constexpr unsigned int load_tile_width_elms = load_tile_width * elms_per_load;
+    constexpr unsigned int load_tile_height = 8;
+
+    constexpr unsigned int A_load_tiles_m = DIV_UP(shared_m, load_tile_height);
+    constexpr unsigned int A_load_tiles_k = DIV_UP(shared_k, load_tile_width_elms);
+
+    constexpr unsigned int B_load_tiles_k = DIV_UP(shared_k, load_tile_height);
+    constexpr unsigned int B_load_tiles_n = DIV_UP(shared_n, load_tile_width_elms);
+
 
     auto zero_elm = LOAD_TYPE();
 
@@ -193,21 +204,41 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             for (int i = 0; i < DIV_UP(copies_per_thread_A, elms_per_load); i++)
             {
                 unsigned int load_i = threadIdx.x + i * blockDim.x;
-                unsigned int load_m_i = load_i / DIV_UP(shared_k, elms_per_load);
-                unsigned int load_k_i = load_i % DIV_UP(shared_k, elms_per_load);
+
+                unsigned int load_tile_i = load_i / (load_tile_width * load_tile_height);
+                unsigned int load_i_in_tile = load_i % (load_tile_width * load_tile_height);
+
+                unsigned int load_tile_k_i = load_tile_i % A_load_tiles_k;
+                unsigned int load_tile_m_i = load_tile_i / A_load_tiles_k;
+
+                unsigned int load_tile_k_shared_offset = load_tile_k_i * load_tile_width_elms;
+                unsigned int load_tile_m_shared_offset = load_tile_m_i * load_tile_height;
+
+                unsigned int load_k_i = load_i_in_tile % load_tile_width;
+                unsigned int load_m_i = load_i_in_tile / load_tile_width;
+
+                unsigned int load_k_swizzled_i = load_k_i ^ load_m_i;
+                unsigned int load_m_swizzled_i = load_k_i;
 
                 // Each load is of size 1 x elms_per_load
-                unsigned int load_m_index = load_m_i;
-                unsigned int load_k_index = load_k_i * elms_per_load;
+                unsigned int load_k_shared_index = load_tile_k_shared_offset + load_k_i * elms_per_load;
+                unsigned int load_m_shared_index = load_tile_m_shared_offset + load_m_i;
 
-                unsigned int A_m_index = block_m_global_offset + load_m_index;
-                unsigned int A_k_index = global_k_offset + load_k_index;
+                // Each load is of size 1 x elms_per_load
+                unsigned int load_k_swizzled_index = load_k_swizzled_i * elms_per_load;
+                unsigned int load_m_swizzled_index = load_m_swizzled_i;
 
-                if (load_m_index < shared_m)
+                unsigned int A_m_index = block_m_global_offset + load_m_shared_index;
+                unsigned int A_k_index = global_k_offset + load_k_shared_index;
+
+
+                if (load_m_shared_index < shared_m)
                 {
-                    auto load_dest = &A_shared[load_buffer * shared_m * A_shared_k_true
-                                               + load_m_index * A_shared_k_true
-                                               + load_k_index];
+                    auto load_dest = &A_shared[load_buffer * shared_m * shared_k
+                                               + load_tile_m_i * A_load_tiles_k * load_tile_width_elms * load_tile_height
+                                               + load_tile_k_i * load_tile_width_elms * load_tile_height
+                                               + load_m_swizzled_index * load_tile_width_elms
+                                               + load_k_swizzled_index];
                     if (A_m_index < m && A_k_index < k) {
                         cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]), sizeof(LOAD_TYPE), pipeline);
                     } else {
@@ -222,21 +253,41 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             for (int i = 0; i < DIV_UP(copies_per_thread_B, elms_per_load); i++)
             {
                 unsigned int load_i = threadIdx.x + i * blockDim.x;
-                unsigned int load_k_i = load_i / DIV_UP(shared_n, elms_per_load);
-                unsigned int load_n_i = load_i % DIV_UP(shared_n, elms_per_load);
+
+                unsigned int load_tile_i = load_i / (load_tile_width * load_tile_height);
+                unsigned int load_i_in_tile = load_i % (load_tile_width * load_tile_height);
+
+                unsigned int load_tile_n_i = load_tile_i % B_load_tiles_n;
+                unsigned int load_tile_k_i = load_tile_i / B_load_tiles_n;
+
+                unsigned int load_tile_n_shared_offset = load_tile_n_i * load_tile_width_elms;
+                unsigned int load_tile_k_shared_offset = load_tile_k_i * load_tile_height;
+
+                unsigned int load_n_i = load_i_in_tile % load_tile_width;
+                unsigned int load_k_i = load_i_in_tile / load_tile_width;
+
+                unsigned int load_n_swizzled_i = load_n_i ^ load_k_i;
+                unsigned int load_k_swizzled_i = load_n_i;
 
                 // Each load is of size 1 x elms_per_load
-                unsigned int load_k_index = load_k_i;
-                unsigned int load_n_index = load_n_i * elms_per_load;
+                unsigned int load_n_shared_index = load_tile_n_shared_offset + load_n_i * elms_per_load;
+                unsigned int load_k_shared_index = load_tile_k_shared_offset + load_k_i;
 
-                unsigned int B_k_index = global_k_offset + load_k_index;
-                unsigned int B_n_index = block_n_global_offset + load_n_index;
+                // Each load is of size 1 x elms_per_load
+                unsigned int load_n_swizzled_index = load_n_swizzled_i * elms_per_load;
+                unsigned int load_k_swizzled_index = load_k_swizzled_i;
 
-                if (load_k_index < shared_k)
+                unsigned int B_k_index = global_k_offset + load_k_shared_index;
+                unsigned int B_n_index = block_n_global_offset + load_n_shared_index;
+
+
+                if (load_k_shared_index < shared_k)
                 {
-                    auto load_dest = &B_shared[load_buffer * shared_k * B_shared_n_true
-                                               + load_k_index * B_shared_n_true
-                                               + load_n_index];
+                    auto load_dest = &B_shared[load_buffer * shared_k * shared_n
+                                               + load_tile_k_i * B_load_tiles_n * load_tile_width_elms * load_tile_height
+                                               + load_tile_n_i * load_tile_width_elms * load_tile_height
+                                               + load_k_swizzled_index * load_tile_width_elms
+                                               + load_n_swizzled_index];
                     if (B_k_index < k && B_n_index < n) {
                         cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&B[B_k_index * n + B_n_index]), sizeof(LOAD_TYPE), pipeline);
                     } else {
@@ -288,15 +339,18 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                             #endif
                             for (int frag_m_offset_i = 0; frag_m_offset_i < frags_m; frag_m_offset_i++)
                             {
-                                auto matrix_ptr = &A_shared[compute_buffer * shared_m * A_shared_k_true +
-                                                            (warp_m_shared_offset + warp_m_offset + frag_m_offset_i * wmma_m) *
-                                                            A_shared_k_true + local_k_offset +
-                                                            frag_k_offset_i * wmma_k];
-                                auto row_i = laneID;
-                                auto row_k_i = row_i / 16;
-                                auto row_m_i = row_i % 16;
+                                unsigned int matrix_m_shared_index = warp_m_shared_offset + warp_m_offset + frag_m_offset_i * wmma_m;
+                                unsigned int matrix_k_shared_index = local_k_offset + frag_k_offset_i * wmma_k;
 
-                                ldmatrix_x4(reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]), matrix_ptr + row_m_i * A_shared_k_true + row_k_i * 8);
+                                unsigned int load_tile_m_i = matrix_m_shared_index / load_tile_height + (warpQuarter & 1);
+                                unsigned int load_tile_k_i = matrix_k_shared_index / load_tile_width_elms;
+
+                                unsigned int load_row = (matrix_k_shared_index % load_tile_width_elms) / elms_per_load + (warpQuarter / 2);
+                                unsigned int load_col = warpIDInQuarter ^ load_row;
+
+                                unsigned int load_index = load_tile_m_i * A_load_tiles_k * load_tile_width_elms * load_tile_height + load_tile_k_i * load_tile_width_elms * load_tile_height + load_row * load_tile_width_elms + load_col * elms_per_load;
+
+                                ldmatrix_x4(reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]), &A_shared[compute_buffer * shared_m * shared_k + load_index]);
                             }
                         }
 
@@ -321,19 +375,18 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                 #endif
                                 for (int frag_n_offset_i = 0; frag_n_offset_i < frags_n; frag_n_offset_i++)
                                 {
-                                    auto matrix_ptr = &B_shared[compute_buffer * shared_k * B_shared_n_true +
-                                                                (local_k_offset + frag_k_offset_i * wmma_k) *
-                                                                B_shared_n_true + warp_n_shared_offset + warp_n_offset +
-                                                                frag_n_offset_i * wmma_n];
+                                    unsigned int matrix_k_shared_index = local_k_offset + frag_k_offset_i * wmma_k;
+                                    unsigned int matrix_n_shared_index = warp_n_shared_offset + warp_n_offset + frag_n_offset_i * wmma_n;
 
-                                    auto row_i = laneID;
-                                    auto row_n_i = row_i / 16;
-                                    auto row_k_i = row_i % 16;
+                                    unsigned int load_tile_k_i = matrix_k_shared_index / load_tile_height + (warpQuarter & 1);
+                                    unsigned int load_tile_n_i = matrix_n_shared_index / load_tile_width_elms;
 
-                                    // Only one row in n dimension
-                                    ldmatrix_x4_trans(
-                                            reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]),
-                                            matrix_ptr + row_k_i * B_shared_n_true + row_n_i * 8);
+                                    unsigned int load_row = (matrix_n_shared_index % load_tile_width_elms) / elms_per_load + (warpQuarter / 2);
+                                    unsigned int load_col = warpIDInQuarter ^ load_row;
+
+                                    unsigned int load_index = load_tile_k_i * B_load_tiles_n * load_tile_width_elms * load_tile_height + load_tile_n_i * load_tile_width_elms * load_tile_height + load_row * load_tile_width_elms + load_col * elms_per_load;
+
+                                    ldmatrix_x4_trans(reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]), &B_shared[compute_buffer * shared_k * shared_n + load_index]);
                                 }
                             }
 

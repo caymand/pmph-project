@@ -15,9 +15,6 @@
 #define MAX_THREADS_PER_BLOCK 1024
 #define MAX_REGISTERS_PER_BLOCK 65536
 
-#ifndef SHARED_PADDING
-#define SHARED_PADDING 8
-#endif
 
 enum mm_kernel {
     register_tiled,
@@ -125,8 +122,8 @@ long int benchmark_optimized_tensor_mmm(
 
     constexpr unsigned int num_stages = NUM_STAGES;
 
-    constexpr unsigned int shared_memory_used_A = shared_m * (shared_k + SHARED_PADDING) * sizeof(elmT) * num_stages;
-    constexpr unsigned int shared_memory_used_B = shared_k * (shared_n + SHARED_PADDING) * sizeof(elmT) * num_stages;
+    constexpr unsigned int shared_memory_used_A = shared_m * shared_k * sizeof(elmT) * num_stages;
+    constexpr unsigned int shared_memory_used_B = shared_k * shared_n * sizeof(elmT) * num_stages;
     constexpr unsigned int shared_memory_used = shared_memory_used_A + shared_memory_used_B;
 
     printf("    Shared memory used: %d/%d bytes (%.0f%%)\n", shared_memory_used, max_shared_memory, (float) shared_memory_used / max_shared_memory * 100);
