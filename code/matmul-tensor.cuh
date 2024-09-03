@@ -300,7 +300,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                             }
                         }
 
-                        #ifdef NOUNROLL2
+                        #ifdef NOUNROLL1
                         #pragma unroll 1
                         #else
                         #ifdef UNROLL
