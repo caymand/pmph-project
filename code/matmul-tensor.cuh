@@ -167,13 +167,14 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
     auto zero_elm = LOAD_TYPE();
 
-    cg::thread_block block = cg::this_thread_block();
-    // Allocate shared storage for a cuda::pipeline:
-    __shared__ cuda::pipeline_shared_state<
-            cuda::thread_scope::thread_scope_block,
-            num_stages
-    > shared_state;
-    auto pipeline = cuda::make_pipeline(block, &shared_state);
+//    cg::thread_block block = cg::this_thread_block();
+//    // Allocate shared storage for a cuda::pipeline:
+//    __shared__ cuda::pipeline_shared_state<
+//            cuda::thread_scope::thread_scope_block,
+//            num_stages
+//    > shared_state;
+//    auto pipeline = cuda::make_pipeline(block, &shared_state);
+
 
     // TODO: account for different elm and acc types
     // Using 2 x 16x8x16 as basic building block
@@ -215,11 +216,11 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         if (global_k_offset_i < k_iterations)
         {
             // Copy A and B to shared memory (Producer Code)
-            pipeline.producer_acquire();
+//            pipeline.producer_acquire();
 
-//            #ifdef UNROLL
-//            #pragma unroll
-//            #endif
+            #ifdef UNROLL
+            #pragma unroll
+            #endif
 // TODO: remove
 //#pragma unroll 1
             for (int i = 0; i < DIV_UP(copies_per_thread_A, elms_per_load); i++)
@@ -261,18 +262,18 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                                + load_m_swizzled_index * load_tile_width_elms
                                                + load_k_swizzled_index];
                     if (A_m_index < m && A_k_index < k) {
-                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]), sizeof(LOAD_TYPE), pipeline);
-//                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]));
+//                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]), sizeof(LOAD_TYPE), pipeline);
+                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]));
                     } else {
-                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm, sizeof(LOAD_TYPE), pipeline);
-//                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm);
+//                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm, sizeof(LOAD_TYPE), pipeline);
+                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm);
                     }
                 }
             }
 
-//            #ifdef UNROLL
-//            #pragma unroll
-//            #endif
+            #ifdef UNROLL
+            #pragma unroll
+            #endif
 // TODO: remove
 //#pragma unroll 1
             for (int i = 0; i < DIV_UP(copies_per_thread_B, elms_per_load); i++)
@@ -314,28 +315,26 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                                + load_k_swizzled_index * load_tile_width_elms
                                                + load_n_swizzled_index];
                     if (B_k_index < k && B_n_index < n) {
-                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&B[B_k_index * n + B_n_index]), sizeof(LOAD_TYPE), pipeline);
-//                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&B[B_k_index * n + B_n_index]));
+//                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&B[B_k_index * n + B_n_index]), sizeof(LOAD_TYPE), pipeline);
+                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&B[B_k_index * n + B_n_index]));
                     } else {
-                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm, sizeof(LOAD_TYPE), pipeline);
-//                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm);
+//                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm, sizeof(LOAD_TYPE), pipeline);
+                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm);
                     }
                 }
             }
-            pipeline.producer_commit();
-//            cp_async_commit();
+//            pipeline.producer_commit();
+            cp_async_commit();
         }
+
+        cp_async_wait<num_stages - 1>();
+        __syncthreads();
 
         if (global_k_offset_i >= num_stages - 1) {
             // Do Matrix multiplication (Consumer Code)
             if (warp_m_global_offset < m && warp_n_global_offset < n)
             {
-                pipeline.consumer_wait();
-// TODO: check this
-                // TODO: what to use?
-//                cp_async_wait<num_stages - 1>();
-                cp_async_wait<1>();
-                __syncthreads();
+//                pipeline.consumer_wait();
 
                 half2 A_frag[frags_m][frags_k][4];
                 half2 B_frag[frags_k][frags_n][2][2];
@@ -461,10 +460,13 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                         }
                     }
                 }
-                pipeline.consumer_release();
+//                pipeline.consumer_release();
+//                __syncthreads();
             }
         }
     }
+
+//    __syncthreads();
 
     if (warp_m_global_offset < m && warp_n_global_offset < n) {
         #ifdef UNROLL
