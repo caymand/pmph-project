@@ -68,6 +68,24 @@ __forceinline__ __device__ void mma_m16n8k16(uint32_t d[4], uint32_t a[4], uint3
     asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
 }
 
+__forceinline__ __device__ void cp_async(void * dst, void * src) {
+    auto dst_p = static_cast<uint32_t>(__cvta_generic_to_shared(dst));
+//    auto src_p = static_cast<uint32_t>(__cvta_generic_to_global(src));
+    asm volatile("cp.async.cg.shared.global [%0], [%1], 16;\n" :  : "r"(dst_p), "l"(src));
+}
+
+__forceinline__ __device__ void cp_async_commit() {
+    asm volatile("cp.async.commit_group;\n" :  : );
+}
+
+template <int N>
+__forceinline__ __device__ void cp_async_wait() {
+//    TODO: use this:
+    asm volatile("cp.async.wait_group %0;\n" :  : "n"(N));
+//    asm volatile("cp.async.wait_all;\n" :  : );
+}
+
+
 // TODO: use something like this maybe 2D b and c, else just double dimensions?
 //__forceinline__ __device__ void mma_m16n16k16(uint32_t d[4], uint32_t a[4], uint32_t b[2], uint32_t c[4]) {
 //    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
@@ -198,9 +216,12 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         {
             // Copy A and B to shared memory (Producer Code)
             pipeline.producer_acquire();
-            #ifdef UNROLL
-            #pragma unroll
-            #endif
+
+//            #ifdef UNROLL
+//            #pragma unroll
+//            #endif
+// TODO: remove
+//#pragma unroll 1
             for (int i = 0; i < DIV_UP(copies_per_thread_A, elms_per_load); i++)
             {
                 unsigned int load_i = threadIdx.x + i * blockDim.x;
@@ -241,15 +262,19 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                                + load_k_swizzled_index];
                     if (A_m_index < m && A_k_index < k) {
                         cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]), sizeof(LOAD_TYPE), pipeline);
+//                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]));
                     } else {
                         cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm, sizeof(LOAD_TYPE), pipeline);
+//                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm);
                     }
                 }
             }
 
-            #ifdef UNROLL
-            #pragma unroll
-            #endif
+//            #ifdef UNROLL
+//            #pragma unroll
+//            #endif
+// TODO: remove
+//#pragma unroll 1
             for (int i = 0; i < DIV_UP(copies_per_thread_B, elms_per_load); i++)
             {
                 unsigned int load_i = threadIdx.x + i * blockDim.x;
@@ -290,12 +315,15 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                                + load_n_swizzled_index];
                     if (B_k_index < k && B_n_index < n) {
                         cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&B[B_k_index * n + B_n_index]), sizeof(LOAD_TYPE), pipeline);
+//                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&B[B_k_index * n + B_n_index]));
                     } else {
                         cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm, sizeof(LOAD_TYPE), pipeline);
+//                        cp_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm);
                     }
                 }
             }
             pipeline.producer_commit();
+//            cp_async_commit();
         }
 
         if (global_k_offset_i >= num_stages - 1) {
@@ -303,6 +331,11 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             if (warp_m_global_offset < m && warp_n_global_offset < n)
             {
                 pipeline.consumer_wait();
+// TODO: check this
+                // TODO: what to use?
+//                cp_async_wait<num_stages - 1>();
+                cp_async_wait<1>();
+                __syncthreads();
 
                 half2 A_frag[frags_m][frags_k][4];
                 half2 B_frag[frags_k][frags_n][2][2];
