@@ -71,7 +71,7 @@ __forceinline__ __device__ void mma_m16n8k16(uint32_t d[4], uint32_t a[4], uint3
 __forceinline__ __device__ void cp_async(void * dst, void * src) {
     auto dst_p = static_cast<uint32_t>(__cvta_generic_to_shared(dst));
 //    auto src_p = static_cast<uint32_t>(__cvta_generic_to_global(src));
-    asm volatile("cp.async.cg.shared.global [%0], [%1], 16;\n" :  : "r"(dst_p), "l"(src));
+    asm volatile("cp.async.cg.shared.global.L2::128B [%0], [%1], 16;\n" :  : "r"(dst_p), "l"(src));
 }
 
 __forceinline__ __device__ void cp_async_commit() {
