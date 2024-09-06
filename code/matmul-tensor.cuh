@@ -34,7 +34,6 @@ using namespace nvcuda;
 
 namespace cg = cooperative_groups;
 
-// TODO: check reads coalesced, check store is coalesced
 
 #define DIV_UP(a, b) (((a) + (b) - 1) / (b))
 
@@ -68,7 +67,14 @@ __forceinline__ __device__ void mma_m16n8k16(uint32_t d[4], uint32_t a[4], uint3
     asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
 }
 
-// TODO: template to match load_type
+
+// TODO: use something like this maybe 2D b and c, else just double dimensions?
+//__forceinline__ __device__ void mma_m16n16k16(uint32_t d[4], uint32_t a[4], uint32_t b[2], uint32_t c[4]) {
+//    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
+//    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
+//}
+
+
 template <unsigned int load_size>
 __forceinline__ __device__ void cp_async(void * dst, void * src) {
     auto dst_p = static_cast<uint32_t>(__cvta_generic_to_shared(dst));
@@ -106,16 +112,6 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
 
     constexpr unsigned int load_tile_width_core_matrix_rows = DIV_UP(load_tile_width_elms, core_matrix_width_elms);
 
-    constexpr unsigned int load_tile_width_loads = DIV_UP(load_tile_width_elms, elms_per_load);
-
-//    constexpr unsigned int loads_per_load_tile = load_tile_width_loads * load_tile_height;
-
-//    constexpr unsigned int height_load_tiles = DIV_UP(height, load_tile_height);
-//    constexpr unsigned int A_load_tiles_k = DIV_UP(shared_k, load_tile_width_elms);
-//
-//    constexpr unsigned int B_load_tiles_k = DIV_UP(shared_k, load_tile_height);
-//    constexpr unsigned int B_load_tiles_n = DIV_UP(shared_n, load_tile_width_elms);
-
     #ifdef NOUNROLL2
     #pragma unroll 1
     #else
@@ -126,8 +122,8 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
     for (int i = 0; i < loads_per_thread; i++)
     {
         unsigned int load_i = i * threads_per_block + threadIdx.x;
-//                TODO: check that loading is done in similar fashion
-//                Consecutive threads load same matrix row
+
+        // Consecutive threads load same matrix row
         unsigned int core_matrix_row_i = load_i / loads_per_core_matrix_row;
         unsigned int thread_i_in_core_matrix_row = load_i % loads_per_core_matrix_row;
 
@@ -177,11 +173,8 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
 }
 
 
-// TODO: take transpose as template argument
 template <bool transpose, class elmType, unsigned int shared_ldm, unsigned int core_matrix_width_elms, unsigned int load_tile_width_elms, unsigned int load_tile_height>
 __forceinline__ __device__ void load_frags(unsigned int warpQuarter, unsigned int warpIDInQuarter, uint32_t registers[4], elmType * shared, unsigned int matrix_x, unsigned int matrix_y) {
-    // TODO: supply as template arguments?
-
     unsigned int load_tile_x = matrix_x / load_tile_width_elms;
     unsigned int load_tile_y = matrix_y / load_tile_height + (warpQuarter & 1);
 
@@ -203,13 +196,6 @@ __forceinline__ __device__ void load_frags(unsigned int warpQuarter, unsigned in
         ldmatrix_x4(registers, shared_core_matrix_row_ptr);
     }
 }
-
-
-// TODO: use something like this maybe 2D b and c, else just double dimensions?
-//__forceinline__ __device__ void mma_m16n16k16(uint32_t d[4], uint32_t a[4], uint32_t b[2], uint32_t c[4]) {
-//    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
-//    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n" : "=r"(d[0]), "=r"(d[1]), "=r"(d[2]), "=r"(d[3]) : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]), "r"(c[0]), "r"(c[1]), "r"(c[2]), "r"(c[3]));
-//}
 
 
 
