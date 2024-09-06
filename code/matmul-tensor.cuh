@@ -100,8 +100,10 @@ __forceinline__ __device__ void cp_async_wait_all() {
     asm volatile("cp.async.wait_all;\n" :  : );
 }
 
-template <class elmType, unsigned int load_size, unsigned int threads_per_block, unsigned int width, unsigned int height, unsigned int core_matrix_width_elms, unsigned int load_tile_width_elms, unsigned int load_tile_height>
-__forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared, elmType * global, const unsigned int global_offset_x, const unsigned int global_offset_y, const unsigned int global_width, const unsigned int global_height, LOAD_TYPE * zero_elm) {
+template <class elmType, unsigned int load_size, unsigned int threads_per_block, unsigned int width, unsigned int height, unsigned int core_matrix_width_elms, unsigned int load_tile_width_elms, unsigned int load_tile_height, cuda::thread_scope thread_scope>
+__forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared, elmType * global, const unsigned int global_offset_x, const unsigned int global_offset_y, const unsigned int global_width, const unsigned int global_height, LOAD_TYPE * zero_elm, cuda::pipeline<thread_scope> &pipeline) {
+    auto aligned_size = cuda::aligned_size_t<load_size>(load_size);
+
     constexpr int elms_per_load = DIV_UP(sizeof(LOAD_TYPE), sizeof(elmType));
 
     constexpr int loads_per_thread = DIV_UP(width * height, elms_per_load * threads_per_block);
@@ -153,21 +155,22 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
             auto global_core_matrix_row_ptr = &global[core_matrix_row_global_offset_y * global_width + core_matrix_row_global_offset_x];
             auto shared_core_matrix_row_ptr = &shared[core_matrix_row_shared_offset_y * width + core_matrix_row_shared_offset_x];
 
-//                    pipeline.producer_acquire();
+//            pipeline.producer_acquire();
             if (core_matrix_row_global_offset_x < global_width && core_matrix_row_global_offset_y < global_height) {
-//                        *reinterpret_cast<LOAD_TYPE *>(load_dest) = *reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]);
-//                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), reinterpret_cast<LOAD_TYPE *>(&A[A_m_index * k + A_k_index]), load_size, pipeline);
-                cp_async<load_size>(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], &reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row]);
+//                reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row] = reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row];
+                cuda::memcpy_async(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], &reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row], aligned_size, pipeline);
+//                cp_async<load_size>(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], &reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row]);
             } else {
-//                        *reinterpret_cast<LOAD_TYPE *>(load_dest) = LOAD_TYPE();
-//                        cuda::memcpy_async(reinterpret_cast<LOAD_TYPE *>(load_dest), &zero_elm, load_size, pipeline);
-// TODO: handle zeros, use ignore-src or src-size
-                cp_async<load_size>(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], zero_elm);
+                // TODO: handle zeros, use ignore-src or src-size
+
+//                reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row] = LOAD_TYPE();
+                cuda::memcpy_async(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], &zero_elm, aligned_size, pipeline);
+//                cp_async<load_size>(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], zero_elm);
             }
             // TODO: try committing here, or remove
 //                    __syncwarp();
-            cp_async_commit();
-//                    pipeline.producer_commit();
+//            cp_async_commit();
+//            pipeline.producer_commit();
         }
     }
 }
@@ -275,13 +278,13 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
     auto zero_elm = LOAD_TYPE();
 
-//    cg::thread_block block = cg::this_thread_block();
-//    // Allocate shared storage for a cuda::pipeline:
-//    __shared__ cuda::pipeline_shared_state<
-//            cuda::thread_scope::thread_scope_block,
-//            num_stages
-//    > shared_state;
-//    auto pipeline = cuda::make_pipeline(block, &shared_state);
+    cg::thread_block block = cg::this_thread_block();
+    // Allocate shared storage for a cuda::pipeline:
+    __shared__ cuda::pipeline_shared_state<
+            cuda::thread_scope_block,
+            num_stages
+    > shared_state;
+    auto pipeline = cuda::make_pipeline(block, &shared_state);
 // TODO: set num_stages
 //    auto pipeline = cuda::make_pipeline();
 
@@ -326,25 +329,25 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
         if (global_k_offset_i < k_iterations)
         {
             // Copy A and B to shared memory (Producer Code)
-//            pipeline.producer_acquire();
+            pipeline.producer_acquire();
 
             // TODO:
-            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_k, shared_m, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(&A_shared[load_buffer * shared_m * shared_k], A, global_k_offset, block_m_global_offset, k, m, &zero_elm);
-            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_n, shared_k, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(&B_shared[load_buffer * shared_k * shared_n], B, block_n_global_offset, global_k_offset, n, k, &zero_elm);
+            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_k, shared_m, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(&A_shared[load_buffer * shared_m * shared_k], A, global_k_offset, block_m_global_offset, k, m, &zero_elm, pipeline);
+            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_n, shared_k, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(&B_shared[load_buffer * shared_k * shared_n], B, block_n_global_offset, global_k_offset, n, k, &zero_elm, pipeline);
 
             // TODO: try committing here, or remove
 //                    __syncwarp();
 //            cp_async_commit();
-//            pipeline.producer_commit();
+            pipeline.producer_commit();
         }
 
         if (global_k_offset_i >= num_stages - 1) {
-            cp_async_wait_group<(loads_per_thread_A + loads_per_thread_B) * (num_stages - 1)>();
+//            cp_async_wait_group<(loads_per_thread_A + loads_per_thread_B) * (num_stages - 1)>();
 // TODO: remove
 //            __syncwarp();
 //            cp_async_wait_all();
-//            pipeline.consumer_wait();
-            __syncthreads();
+            pipeline.consumer_wait();
+//            __syncthreads();
 
             // Do Matrix multiplication (Consumer Code)
             if (warp_m_global_offset < m && warp_n_global_offset < n)
@@ -458,14 +461,14 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                     }
                 }
             }
-//            pipeline.consumer_release();
-//    TODO: remove?
-            __syncthreads();
+            pipeline.consumer_release();
+            //    TODO: remove?
+//            __syncthreads();
         }
     }
 
 //    TODO: remove?
-//    __syncthreads();
+    __syncthreads();
 
     if (warp_m_global_offset < m && warp_n_global_offset < n) {
         #ifdef UNROLL
