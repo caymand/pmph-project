@@ -12,6 +12,8 @@
 - Transpose on load to shared
 - Producer threads, consumer threads
 
+- Try doing swizzled loads in sequential phases
+
 
 # Results
 ## Local
