@@ -2,7 +2,7 @@ import colorama
 import numpy as np
 from colorama import Back
 
-X = 8
+X = 4
 Y = 8
 
 colors = {0: Back.BLUE, 1: Back.GREEN, 2: Back.YELLOW, 3: Back.RED, 4: Back.CYAN, 5: Back.MAGENTA, 6: Back.WHITE, 7: Back.BLACK}
@@ -24,7 +24,7 @@ print("\n\n\n")
 
 # Option 2
 def global_shared_map(x, y):
-    new_y = x
+    new_y = x % X
     new_x = y ^ new_y
 
     return new_x, new_y
@@ -38,8 +38,8 @@ for y in range(Y):
         shared_global_map[(new_x, new_y)] = (x, y)
 
 
-for y in range(Y):
-    for x in range(X):
+for y in range(X):
+    for x in range(Y):
         src_x, src_y = shared_global_map[(x, y)]
         print_cell(src_x, src_y)
 
@@ -48,8 +48,8 @@ for y in range(Y):
 print("\n\n\n")
 
 
-for y in range(Y):
-    for x in range(X):
+for y in range(X):
+    for x in range(Y):
         src_x, src_y = shared_global_map[(x, y)]
         print_cell(src_x, src_y ^ src_x)
     print_newline()

@@ -83,8 +83,9 @@ __forceinline__ __device__ void cp_async(void * dst, void * src) {
     if constexpr (load_size == 16) {
         asm volatile("cp.async.cg.shared.global.L2::128B [%0], [%1], 16;\n" :  : "r"(dst_p), "l"(src));
     } else if constexpr (load_size == 4) {
-//        asm volatile("cp.async.ca.shared.global.L2::128B [%0], [%1], 4;\n" :  : "r"(dst_p), "l"(src));
-        asm volatile("cp.async.ca.shared.global [%0], [%1], 4;\n" :  : "r"(dst_p), "l"(src));
+        asm volatile("cp.async.ca.shared.global.L2::128B [%0], [%1], 4;\n" :  : "r"(dst_p), "l"(src));
+//        asm volatile("cp.async.ca.shared.global.L2::64B [%0], [%1], 4;\n" :  : "r"(dst_p), "l"(src));
+//        asm volatile("cp.async.ca.shared.global [%0], [%1], 4;\n" :  : "r"(dst_p), "l"(src));
     }
 }
 
@@ -138,29 +139,35 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
         unsigned int core_matrix_row_x = core_matrix_row_i % width_core_matrix_rows;
         unsigned int core_matrix_row_y = core_matrix_row_i / width_core_matrix_rows;
 
-        unsigned int load_tile_x = core_matrix_row_x / load_tile_width_core_matrix_rows;
         unsigned int core_matrix_row_x_in_tile = core_matrix_row_x % load_tile_width_core_matrix_rows;
-
-        unsigned int load_tile_y = core_matrix_row_y / load_tile_height;
         unsigned int core_matrix_row_y_in_tile = core_matrix_row_y % load_tile_height;
 
-        unsigned int core_matrix_row_x_in_tile_swizzled = core_matrix_row_x_in_tile ^ core_matrix_row_y_in_tile;
-        unsigned int core_matrix_row_y_in_tile_swizzled = core_matrix_row_x_in_tile;
+
+//        TODO: extract function?
+        //    TODO: exchange height and width in shared
+        unsigned int load_tile_x = core_matrix_row_x / load_tile_width_core_matrix_rows;
+        unsigned int load_tile_y = core_matrix_row_y / load_tile_height;
 
         unsigned int load_tile_offset_x = load_tile_x * load_tile_width_elms;
         unsigned int load_tile_offset_y = load_tile_y * load_tile_height;
 
-        unsigned int core_matrix_row_global_offset_x = global_offset_x + load_tile_offset_x + core_matrix_row_x_in_tile * core_matrix_width_elms;
-        unsigned int core_matrix_row_global_offset_y = global_offset_y + load_tile_offset_y + core_matrix_row_y_in_tile;
+        //    TODO: check this
+        unsigned int core_matrix_row_y_in_tile_swizzled = core_matrix_row_x_in_tile;
+        unsigned int core_matrix_row_x_in_tile_swizzled = core_matrix_row_x_in_tile ^ core_matrix_row_y_in_tile;
 
         unsigned int core_matrix_row_shared_offset_x = load_tile_offset_x + core_matrix_row_x_in_tile_swizzled * core_matrix_width_elms;
         unsigned int core_matrix_row_shared_offset_y = load_tile_offset_y + core_matrix_row_y_in_tile_swizzled;
 
+        auto shared_core_matrix_row_ptr = &shared[core_matrix_row_shared_offset_y * width + core_matrix_row_shared_offset_x];
+
+
+        unsigned int core_matrix_row_global_offset_x = global_offset_x + load_tile_offset_x + core_matrix_row_x_in_tile * core_matrix_width_elms;
+        unsigned int core_matrix_row_global_offset_y = global_offset_y + load_tile_offset_y + core_matrix_row_y_in_tile;
+
+        auto global_core_matrix_row_ptr = &global[core_matrix_row_global_offset_y * global_width + core_matrix_row_global_offset_x];
+
         if (core_matrix_row_shared_offset_y < height)
         {
-            auto global_core_matrix_row_ptr = &global[core_matrix_row_global_offset_y * global_width + core_matrix_row_global_offset_x];
-            auto shared_core_matrix_row_ptr = &shared[core_matrix_row_shared_offset_y * width + core_matrix_row_shared_offset_x];
-
 //            pipeline.producer_acquire();
             if (core_matrix_row_global_offset_x < global_width && core_matrix_row_global_offset_y < global_height) {
 //                reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row] = reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row];
@@ -190,12 +197,15 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
 
 template <bool transpose, class elmType, unsigned int shared_ldm, unsigned int core_matrix_width_elms, unsigned int load_tile_width_elms, unsigned int load_tile_height>
 __forceinline__ __device__ void load_frags(unsigned int warpQuarter, unsigned int warpIDInQuarter, uint32_t registers[4], elmType * shared, unsigned int matrix_x, unsigned int matrix_y) {
+    //    TODO: exchange height and width in shared
     unsigned int load_tile_x = matrix_x / load_tile_width_elms;
     unsigned int load_tile_y = matrix_y / load_tile_height + (warpQuarter & 1);
 
+//    TODO: exchange height and width in shared
     unsigned int load_tile_offset_x = load_tile_x * load_tile_width_elms;
     unsigned int load_tile_offset_y = load_tile_y * load_tile_height;
 
+//    TODO: check this, extract function?
     unsigned int core_matrix_row_y_in_tile_swizzled = (matrix_x % load_tile_width_elms) / core_matrix_width_elms + (warpQuarter / 2);
     unsigned int core_matrix_row_x_in_tile_swizzled = warpIDInQuarter ^ core_matrix_row_y_in_tile_swizzled;
 
@@ -241,10 +251,6 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     constexpr unsigned int shared_n = wmma_n * frags_n * warp_tiles_n * block_tiles_n;
     constexpr unsigned int shared_k = wmma_k * frags_k * warp_tiles_k;
 
-//    TODO: handle other cases, account for differennt element sizes
-    // Assumes 128B in leading dimension of A and B
-    assert(shared_k * sizeof(elmType) % 128 == 0 && shared_n * sizeof(elmType) % 128 == 0 );
-
     unsigned int warpID = threadIdx.x / warpSize;
     unsigned int laneID = threadIdx.x % warpSize;
 
@@ -276,7 +282,14 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     constexpr unsigned int core_matrix_width_elms = 8;
     constexpr unsigned int core_matrix_height = 8;
 
-    constexpr unsigned int load_tile_width_elms = 128 / sizeof(elmType);
+    constexpr unsigned int elms_in128B = 128 / sizeof(elmType);
+
+//    TODO: avoid using --expt-relaxed-constexpr?
+    constexpr unsigned int load_tile_width_elms_A = std::min(elms_in128B, shared_k);
+    constexpr unsigned int load_tile_width_elms_B = std::min(elms_in128B, shared_n);
+//    constexpr unsigned int load_tile_width_elms_A = elms_in128B;
+//    constexpr unsigned int load_tile_width_elms_B = elms_in128B;
+
     constexpr unsigned int load_tile_height = core_matrix_height;
 
 
@@ -287,6 +300,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
     auto zero_elm = LOAD_TYPE();
 
+
+//    TODO: fix racecondition when not using pipeline!!!!!
     #ifdef USE_PIPELINE
     cg::thread_block block = cg::this_thread_block();
     // Allocate shared storage for a cuda::pipeline:
@@ -342,11 +357,11 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             // Copy A and B to shared memory (Producer Code)
             #ifdef USE_PIPELINE
             pipeline.producer_acquire();
-            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_k, shared_m, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(&A_shared[load_buffer * shared_m * shared_k], A, global_k_offset, block_m_global_offset, k, m, &zero_elm, pipeline);
-            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_n, shared_k, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(&B_shared[load_buffer * shared_k * shared_n], B, block_n_global_offset, global_k_offset, n, k, &zero_elm, pipeline);
+            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_k, shared_m, core_matrix_width_elms, load_tile_width_elms_A, load_tile_height>(&A_shared[load_buffer * shared_m * shared_k], A, global_k_offset, block_m_global_offset, k, m, &zero_elm, pipeline);
+            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_n, shared_k, core_matrix_width_elms, load_tile_width_elms_B, load_tile_height>(&B_shared[load_buffer * shared_k * shared_n], B, block_n_global_offset, global_k_offset, n, k, &zero_elm, pipeline);
             #else
-            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_k, shared_m, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(&A_shared[load_buffer * shared_m * shared_k], A, global_k_offset, block_m_global_offset, k, m, &zero_elm);
-            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_n, shared_k, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(&B_shared[load_buffer * shared_k * shared_n], B, block_n_global_offset, global_k_offset, n, k, &zero_elm);
+            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_k, shared_m, core_matrix_width_elms, load_tile_width_elms_A, load_tile_height>(&A_shared[load_buffer * shared_m * shared_k], A, global_k_offset, block_m_global_offset, k, m, &zero_elm);
+            copy_global_to_shared_swizzled<elmType, sizeof(LOAD_TYPE), threads_per_block, shared_n, shared_k, core_matrix_width_elms, load_tile_width_elms_B, load_tile_height>(&B_shared[load_buffer * shared_k * shared_n], B, block_n_global_offset, global_k_offset, n, k, &zero_elm);
             // TODO: try committing here, or remove
             // __syncwarp();
             cp_async_commit();
@@ -410,7 +425,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                 unsigned int matrix_k_shared_index = local_k_offset + frag_k_offset_i * wmma_k;
                                 unsigned int matrix_m_shared_index = warp_m_shared_offset + warp_m_offset + frag_m_offset_i * wmma_m;
 
-                                load_frags<false, elmType, shared_k, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(warpQuarter, warpIDInQuarter, reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]), &A_shared[compute_buffer * shared_m * shared_k], matrix_k_shared_index, matrix_m_shared_index);
+                                load_frags<false, elmType, shared_k, core_matrix_width_elms, load_tile_width_elms_A, load_tile_height>(warpQuarter, warpIDInQuarter, reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]), &A_shared[compute_buffer * shared_m * shared_k], matrix_k_shared_index, matrix_m_shared_index);
                             }
                         }
 
@@ -438,7 +453,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                     unsigned int matrix_k_shared_index = local_k_offset + frag_k_offset_i * wmma_k;
                                     unsigned int matrix_n_shared_index = warp_n_shared_offset + warp_n_offset + frag_n_offset_i * wmma_n;
 
-                                    load_frags<true, elmType, shared_n, core_matrix_width_elms, load_tile_width_elms, load_tile_height>(warpQuarter, warpIDInQuarter, reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]), &B_shared[compute_buffer * shared_k * shared_n], matrix_n_shared_index, matrix_k_shared_index);
+                                    load_frags<true, elmType, shared_n, core_matrix_width_elms, load_tile_width_elms_B, load_tile_height>(warpQuarter, warpIDInQuarter, reinterpret_cast<uint32_t *>(B_frag[frag_k_offset_i][frag_n_offset_i]), &B_shared[compute_buffer * shared_k * shared_n], matrix_n_shared_index, matrix_k_shared_index);
                                 }
                             }
 
