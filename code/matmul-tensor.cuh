@@ -313,7 +313,10 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     constexpr unsigned int load_tile_height_A = core_matrix_height;
     constexpr unsigned int load_tile_height_B = core_matrix_height;
 
-    auto zero_elm = LOAD_TYPE();
+//    TODO: choose
+//    auto zero_elm = LOAD_TYPE();
+    __shared__ LOAD_TYPE zero_elm;
+    zero_elm = LOAD_TYPE();
 
 
 // TODO: why spilling when using pipeline?
@@ -361,6 +364,14 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     }
 
     unsigned int k_iterations = DIV_UP(k, shared_k);
+
+    #ifdef NOUNROLL1
+    #pragma unroll 1
+    #else
+    #ifdef UNROLL
+    #pragma unroll
+    #endif
+    #endif
     for (int global_k_offset_i = 0; global_k_offset_i < k_iterations + num_stages - 1; global_k_offset_i++) {
         int global_k_offset = global_k_offset_i * shared_k;
 
@@ -408,9 +419,6 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
             // Do Matrix multiplication (Consumer Code)
             if (warp_m_global_offset < m && warp_n_global_offset < n)
             {
-                half2 A_frag[frags_m][frags_k][4];
-                half2 B_frag[frags_k][frags_n][2][2];
-
                 #ifdef NOUNROLL
                 #pragma unroll 1
                 #else
@@ -422,16 +430,14 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 {
                     int local_k_offset = local_k_offset_i * frags_k * wmma_k;
 
-                    #ifdef NOUNROLL1
-                    #pragma unroll 1
-                    #else
                     #ifdef UNROLL
                     #pragma unroll
-                    #endif
                     #endif
                     for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
                     {
                         int warp_m_offset = warp_m_offset_i * frags_m * wmma_m;
+
+                        half2 A_frag[frags_m][frags_k][4];
 
                         #ifdef UNROLL
                         #pragma unroll
@@ -450,16 +456,14 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                             }
                         }
 
-                        #ifdef NOUNROLL1
-                        #pragma unroll 1
-                        #else
                         #ifdef UNROLL
                         #pragma unroll
-                        #endif
                         #endif
                         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
                             int warp_n_offset = warp_n_offset_i * frags_n * wmma_n;
+
+                            half2 B_frag[frags_k][frags_n][2][2];
 
                             #ifdef UNROLL
                             #pragma unroll
