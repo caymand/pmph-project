@@ -1,10 +1,9 @@
-# TODO: use other arch?
-CXX = nvcc #nvcc -O3 -arch=sm_80 # g++
+CXX = nvcc
 CXXFLAGS = -O3 -std=c++17 -arch=sm_80  #-Wall  -pedantic
-CFILES = main.cu goldenSeq.cpp
-CUFILES = matmul.cu # matmul-tensor.cu
-HEADERS = matmul.cuh helpers.h helpers.tpp goldenSeq.h matmul-tensor.cuh
+CUFILES = main.cu
+HEADERS = matmul.cuh helpers.h matmul-tensor-naive.cuh matmul-tensor.cuh
 OPTIONS= -Xptxas=-v \
+	--expt-relaxed-constexpr \
 	-lcublas \
 	-DWARP_TILES_M=1 \
 	-DWARP_TILES_N=2 \
@@ -26,7 +25,7 @@ run: $(MAIN)
 
 # depends on headers and source
 $(MAIN): $(CFILES) $(HEADERS)
-	$(CXX) $(CXXFLAGS) $(CUFILES) $(CFILES) $(OPTIONS) -o $(MAIN)
+	$(CXX) $(CXXFLAGS) $(CUFILES) $(OPTIONS) -o $(MAIN)
 
 clean:
 	- rm main

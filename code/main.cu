@@ -1,8 +1,8 @@
 #include <cstdio>
 #include <mma.h>
 #include "matmul.cuh"
-#include "helpers.h"
-#include "goldenSeq.h"
+#include "helpers.cuh"
+#include "matmul-tensor-naive.cuh"
 #include "matmul-tensor.cuh"
 #include "cuda_fp16.h"
 #include <cassert>
@@ -548,9 +548,9 @@ int main(int argc, char * argv[])
         n_runs, m, n, k, A_accT, B_accT, C_target, C_target, std::string("GPU register tiled")
     );
 
-//    benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_naive, true>(
-//        n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor naive")
-//    );
+    benchmark_kernel<element_type, acc_type, 2, mm_kernel::tensor_naive, true>(
+        n_runs, m, n, k, A, B, C, C_target, std::string("GPU tensor naive")
+    );
 
     benchmark_kernel<element_type, acc_type, 2, mm_kernel::cublas, true>(
         n_runs, m, n, k, A, B, C, C_target, std::string("cublas")
