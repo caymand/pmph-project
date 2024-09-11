@@ -20,8 +20,12 @@
 #define NUM_STAGES 2
 #endif
 
+#ifdef SYNC_CPY
+#define USE_PIPELINE
+#endif
 
-#include <stdint.h>
+
+#include <cstdint>
 #include <mma.h>
 #include "cuda_fp16.h"
 
@@ -150,6 +154,8 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
         unsigned int core_matrix_row_x_in_tile = core_matrix_row_x % load_tile_width_core_matrix_rows;
         unsigned int core_matrix_row_y_in_tile = core_matrix_row_y % load_tile_height;
 
+        core_matrix_row_y_in_tile = core_matrix_row_y_in_tile / 2 + (core_matrix_row_y_in_tile % 2) * (load_tile_height / 2);
+
         unsigned int core_matrix_row_y_in_tile_swizzled = core_matrix_row_x_in_tile;
         unsigned int core_matrix_row_x_in_tile_swizzled = core_matrix_row_y_in_tile ^ core_matrix_row_x_in_tile;
 
@@ -171,21 +177,26 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
         {
 //            pipeline.producer_acquire();
             if (core_matrix_row_global_offset_x < global_width && core_matrix_row_global_offset_y < global_height) {
-//                TODO: add macro for synchronous copy?
-//                reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row] = reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row];
+                #ifdef SYNC_CPY
+                reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row] = reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row];
+                #else
                 #ifdef USE_PIPELINE
                 cuda::memcpy_async(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], &reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row], load_size, pipeline);
                 #else
                 cp_async<load_size>(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], &reinterpret_cast<LOAD_TYPE *>(global_core_matrix_row_ptr)[thread_i_in_core_matrix_row]);
                 #endif
+                #endif
             } else {
                 // TODO: handle zeros, use ignore-src or src-size
-//                reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row] = LOAD_TYPE();
 
+                #ifdef SYNC_CPY
+                reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row] = LOAD_TYPE();
+                #else
                 #ifdef USE_PIPELINE
                 cuda::memcpy_async(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], &zero_elm, load_size, pipeline);
                 #else
                 cp_async<load_size>(&reinterpret_cast<LOAD_TYPE *>(shared_core_matrix_row_ptr)[thread_i_in_core_matrix_row], zero_elm);
+                #endif
                 #endif
             }
             // TODO: try committing here, or remove
@@ -319,7 +330,6 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     zero_elm = LOAD_TYPE();
 
 
-// TODO: why spilling when using pipeline?
     #ifdef USE_PIPELINE
     cg::thread_block block = cg::this_thread_block();
     // Allocate shared storage for a cuda::pipeline:
@@ -337,24 +347,16 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     float C_frag[frags_m * warp_tiles_m][frags_n * warp_tiles_n][2][4];
 
     // Initialize C_frag to zero
-    #ifdef UNROLL
     #pragma unroll
-    #endif
     for (int warp_m_offset_i = 0; warp_m_offset_i < frags_m * warp_tiles_m; warp_m_offset_i++)
     {
-        #ifdef UNROLL
         #pragma unroll
-        #endif
         for (int warp_n_offset_i = 0; warp_n_offset_i < frags_n * warp_tiles_n; warp_n_offset_i++)
         {
-            #ifdef UNROLL
             #pragma unroll
-            #endif
             for (int j = 0; j < 2; j++)
             {
-                #ifdef UNROLL
                 #pragma unroll
-                #endif
                 for (int i = 0; i < 4; i++)
                 {
                     C_frag[warp_m_offset_i][warp_n_offset_i][j][i] = float();
@@ -400,7 +402,8 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 //            TODO: handle differently, handle more than 2 pipeline stages?
             #ifndef USE_PIPELINE
             cp_async_wait_all();
-            __syncthreads();
+//            Not needed since syncing below
+//            __syncthreads();
             #endif
         }
 
@@ -430,23 +433,17 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                 {
                     int local_k_offset = local_k_offset_i * frags_k * wmma_k;
 
-                    #ifdef UNROLL
                     #pragma unroll
-                    #endif
                     for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
                     {
                         int warp_m_offset = warp_m_offset_i * frags_m * wmma_m;
 
                         half2 A_frag[frags_m][frags_k][4];
 
-                        #ifdef UNROLL
                         #pragma unroll
-                        #endif
                         for (int frag_k_offset_i = 0; frag_k_offset_i < frags_k; frag_k_offset_i++)
                         {
-                            #ifdef UNROLL
                             #pragma unroll
-                            #endif
                             for (int frag_m_offset_i = 0; frag_m_offset_i < frags_m; frag_m_offset_i++)
                             {
                                 unsigned int matrix_k_shared_index = local_k_offset + frag_k_offset_i * wmma_k;
@@ -456,23 +453,17 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                             }
                         }
 
-                        #ifdef UNROLL
                         #pragma unroll
-                        #endif
                         for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
                         {
                             int warp_n_offset = warp_n_offset_i * frags_n * wmma_n;
 
                             half2 B_frag[frags_k][frags_n][2][2];
 
-                            #ifdef UNROLL
                             #pragma unroll
-                            #endif
                             for (int frag_k_offset_i = 0; frag_k_offset_i < frags_k; frag_k_offset_i++)
                             {
-                                #ifdef UNROLL
                                 #pragma unroll
-                                #endif
                                 for (int frag_n_offset_i = 0; frag_n_offset_i < frags_n; frag_n_offset_i++)
                                 {
                                     unsigned int matrix_k_shared_index = local_k_offset + frag_k_offset_i * wmma_k;
@@ -482,19 +473,13 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                 }
                             }
 
-                            #ifdef UNROLL
                             #pragma unroll
-                            #endif
                             for (int frag_k_offset_i = 0; frag_k_offset_i < frags_k; frag_k_offset_i++)
                             {
-                                #ifdef UNROLL
                                 #pragma unroll
-                                #endif
                                 for (int frag_m_offset_i = 0; frag_m_offset_i < frags_m; frag_m_offset_i++)
                                 {
-                                    #ifdef UNROLL
                                     #pragma unroll
-                                    #endif
                                     for (int frag_n_offset_i = 0; frag_n_offset_i < frags_n; frag_n_offset_i++)
                                     {
                                         #ifdef SERPENTINE
@@ -505,9 +490,7 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
                                         int frag_n_offset_i_serpentine = frag_n_offset_i;
                                         #endif
 
-                                        #ifdef UNROLL
                                         #pragma unroll
-                                        #endif
                                         for (int i = 0; i < 2; i++) {
                                             mma_m16n8k16(reinterpret_cast<uint32_t *>(C_frag[warp_m_offset_i * frags_m + frag_m_offset_i][warp_n_offset_i * frags_n + frag_n_offset_i_serpentine][i]),
                                                          reinterpret_cast<uint32_t *>(A_frag[frag_m_offset_i][frag_k_offset_i]),
@@ -534,28 +517,20 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
     __syncthreads();
 
     if (warp_m_global_offset < m && warp_n_global_offset < n) {
-        #ifdef UNROLL
         #pragma unroll
-        #endif
         for (int warp_m_offset_i = 0; warp_m_offset_i < warp_tiles_m; warp_m_offset_i++)
         {
             int warp_m_offset = warp_m_offset_i * frags_m * wmma_m;
 
-            #ifdef UNROLL
             #pragma unroll
-            #endif
             for (int warp_n_offset_i = 0; warp_n_offset_i < warp_tiles_n; warp_n_offset_i++)
             {
                 int warp_n_offset = warp_n_offset_i * frags_n * wmma_n;
 
-                #ifdef UNROLL
                 #pragma unroll
-                #endif
                 for (int frag_m_offset_i = 0; frag_m_offset_i < frags_m; frag_m_offset_i++)
                 {
-                    #ifdef UNROLL
                     #pragma unroll
-                    #endif
                     for (int frag_n_offset_i = 0; frag_n_offset_i < frags_n; frag_n_offset_i++)
                     {
                         unsigned int m_offset = warp_m_global_offset + warp_m_offset + frag_m_offset_i * wmma_m;
@@ -563,14 +538,10 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
                         // TODO: vectorize stores, try storing in shared first, then coalesced store to global
                         // TODO: refactor, rename
-                        #ifdef UNROLL
                         #pragma unroll
-                        #endif
                         for (unsigned int j = 0; j < 2; j++)
                         {
-                            #ifdef UNROLL
                             #pragma unroll
-                            #endif
                             for (unsigned int i = 0; i < 4; i++)
                             {
                                 unsigned int row = groupID + 8 * (i / 2);
