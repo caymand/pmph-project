@@ -1,18 +1,7 @@
 CXX = nvcc
-CXXFLAGS = -O3 -std=c++17 -arch=sm_80  #-Wall  -pedantic
 CUFILES = main.cu
-HEADERS = matmul.cuh helpers.h matmul-tensor-naive.cuh matmul-tensor.cuh
-OPTIONS= -Xptxas=-v \
-	--expt-relaxed-constexpr \
-	-lcublas \
-	-DWARP_TILES_M=1 \
-	-DWARP_TILES_N=2 \
-	-DBLOCK_TILES_M=8 \
-	-DBLOCK_TILES_N=4 \
-	-DBLOCK_TILES_K=2 \
-	-DBLOCKS_PER_SM=2 \
-	-DUNROLL \
-	-DLOAD_TYPE=float2
+HEADERS = helpers.cuh matmul.cuh matmul-tensor-naive.cuh matmul-tensor.cuh
+OPTIONS = -O3 -std=c++17 -arch=sm_80 -Xptxas=-v --expt-relaxed-constexpr -lcublas #-Wall  -pedantic
 
 MAIN = main
 GOLDEN_CPU = golden_cpu.o
@@ -25,7 +14,7 @@ run: $(MAIN)
 
 # depends on headers and source
 $(MAIN): $(CFILES) $(HEADERS)
-	$(CXX) $(CXXFLAGS) $(CUFILES) $(OPTIONS) -o $(MAIN)
+	$(CXX) $(OPTIONS) $(CUFILES)  -o $(MAIN)
 
 clean:
 	- rm main

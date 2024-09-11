@@ -68,22 +68,22 @@ long int benchmark_optimized_tensor_mmm(
 #ifdef FRAGS_K
     constexpr int frags_k = FRAGS_K;
 #else
-    constexpr int frags_k = 2;
+    constexpr int frags_k = 1;
 #endif
 #ifdef WARP_TILES_M
     constexpr int warp_tiles_m = WARP_TILES_M;
 #else
-    constexpr int warp_tiles_m = 2;
+    constexpr int warp_tiles_m = 1;
 #endif
 #ifdef WARP_TILES_N
     constexpr int warp_tiles_n = WARP_TILES_N;
 #else
-    constexpr int warp_tiles_n = 2;
+    constexpr int warp_tiles_n = 1;
 #endif
 #ifdef WARP_TILES_K
     constexpr int warp_tiles_k = WARP_TILES_K;
 #else
-    constexpr int warp_tiles_k = 2;
+    constexpr int warp_tiles_k = 4;
 #endif
 #ifdef BLOCK_TILES_M
     constexpr int block_tiles_m = BLOCK_TILES_M;
