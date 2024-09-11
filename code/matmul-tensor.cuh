@@ -154,7 +154,7 @@ __forceinline__ __device__ void copy_global_to_shared_swizzled(elmType * shared,
         unsigned int core_matrix_row_x_in_tile_swizzled = core_matrix_row_y_in_tile ^ core_matrix_row_x_in_tile;
 
 //        Tiles are "transposed" in shared memory
-        unsigned int core_matrix_row_shared_offset_x = load_tile_x * load_tile_height + core_matrix_row_x_in_tile_swizzled * core_matrix_width_elms;
+        unsigned int core_matrix_row_shared_offset_x = load_tile_x * load_tile_height * core_matrix_width_elms + core_matrix_row_x_in_tile_swizzled * core_matrix_width_elms;
         unsigned int core_matrix_row_shared_offset_y = load_tile_y * load_tile_width_core_matrix_rows + core_matrix_row_y_in_tile_swizzled;
 
         unsigned int shared_index = core_matrix_row_shared_offset_y * shared_ldm + core_matrix_row_shared_offset_x;
@@ -217,7 +217,7 @@ __forceinline__ __device__ void load_frags(unsigned int warpQuarter, unsigned in
     unsigned int core_matrix_row_y_in_tile_swizzled = core_matrix_row_x_in_tile;
     unsigned int core_matrix_row_x_in_tile_swizzled = core_matrix_row_y_in_tile ^ core_matrix_row_y_in_tile_swizzled;
 
-    unsigned int core_matrix_row_shared_offset_x = load_tile_x * load_tile_height + core_matrix_row_x_in_tile_swizzled * core_matrix_width_elms;
+    unsigned int core_matrix_row_shared_offset_x = load_tile_x * load_tile_height * core_matrix_width_elms + core_matrix_row_x_in_tile_swizzled * core_matrix_width_elms;
     unsigned int core_matrix_row_shared_offset_y = load_tile_y * load_tile_width_core_matrix_rows + core_matrix_row_y_in_tile_swizzled;
 
     unsigned int shared_index = core_matrix_row_shared_offset_y * shared_ldm + core_matrix_row_shared_offset_x;
@@ -306,12 +306,12 @@ matMulTiledTensor(elmType* A, elmType* B, accType* C, int m, int n, int k) {
 
 //    TODO: choose
     //  TODO: supply as template argument?
-    constexpr unsigned int load_tile_width_core_matrix_rows_A = DIV_UP(load_tile_width_elms_A, core_matrix_width_elms);
-    constexpr unsigned int load_tile_width_core_matrix_rows_B = DIV_UP(load_tile_width_elms_B, core_matrix_width_elms);
-    constexpr unsigned int load_tile_height_A = load_tile_width_core_matrix_rows_A;
-    constexpr unsigned int load_tile_height_B = load_tile_width_core_matrix_rows_B;
-//    constexpr unsigned int load_tile_height_A = core_matrix_height;
-//    constexpr unsigned int load_tile_height_B = core_matrix_height;
+//    constexpr unsigned int load_tile_width_core_matrix_rows_A = DIV_UP(load_tile_width_elms_A, core_matrix_width_elms);
+//    constexpr unsigned int load_tile_width_core_matrix_rows_B = DIV_UP(load_tile_width_elms_B, core_matrix_width_elms);
+//    constexpr unsigned int load_tile_height_A = load_tile_width_core_matrix_rows_A;
+//    constexpr unsigned int load_tile_height_B = load_tile_width_core_matrix_rows_B;
+    constexpr unsigned int load_tile_height_A = core_matrix_height;
+    constexpr unsigned int load_tile_height_B = core_matrix_height;
 
     auto zero_elm = LOAD_TYPE();
 

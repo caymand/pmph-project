@@ -4,7 +4,7 @@ from colorama import Back
 
 core_matrix_X = 8
 
-X = 2
+X = 4
 Y = 8
 
 colors = {0: Back.BLUE, 1: Back.GREEN, 2: Back.YELLOW, 3: Back.RED, 4: Back.CYAN, 5: Back.MAGENTA, 6: Back.WHITE, 7: Back.BLACK}
