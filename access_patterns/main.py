@@ -2,13 +2,15 @@ import colorama
 import numpy as np
 from colorama import Back
 
-X = 4
+core_matrix_X = 8
+
+X = 2
 Y = 8
 
 colors = {0: Back.BLUE, 1: Back.GREEN, 2: Back.YELLOW, 3: Back.RED, 4: Back.CYAN, 5: Back.MAGENTA, 6: Back.WHITE, 7: Back.BLACK}
 
 def print_cell(x, y):
-    print(colors[y] + f"({x*X:02}...{(x+1) * X - 1:02}, {y})", end=Back.RESET + "\t")
+    print(colors[y] + f"({x * core_matrix_X:02}...{(x+1) * core_matrix_X - 1:02}, {y})", end=Back.RESET + "\t")
 
 def print_newline():
     print(Back.RESET + "\n")
