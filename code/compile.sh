@@ -11,7 +11,7 @@ BLOCK_TILES_N=$8
 
 shift 8
 set -x
-nvcc -Xptxas=-v -O3 -std=c++17 -lcublas -arch=sm_80 matmul.cu main.cu goldenSeq.cpp -o main \
+nvcc -Xptxas=-v -O3 -std=c++17 -arch=sm_80 --expt-relaxed-constexpr -lcublas matmul.cu main.cu goldenSeq.cpp -o main \
     -DFRAGS_M=$FRAGS_M \
     -DFRAGS_N=$FRAGS_N \
     -DFRAGS_K=$FRAGS_K \
